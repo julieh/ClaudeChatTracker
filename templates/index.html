@@ -456,6 +456,7 @@ let browseMinStars = '';
 let browseSort = 'date_desc';
 let browseSortProjects = 'chrono'; // 'chrono' or 'alpha'
 let browseAllProjects = []; // cached project list from API
+let browseLastViewedSession = null; // session ID to scroll to after going back
 
 async function loadProjects() {
   const res = await fetch('/api/projects');
@@ -572,7 +573,7 @@ async function loadBrowseSessions() {
   $('#browse-content').innerHTML = filtersHtml + sessions.map(s => {
     const starId = `bs-star-${bsIdx++}`;
     return `
-    <div class="session-item${s.file_missing ? ' file-missing' : ''}" onclick="showSession('${s.session_id}')">
+    <div class="session-item${s.file_missing ? ' file-missing' : ''}" data-session="${s.session_id}" onclick="showSession('${s.session_id}')">
       <div style="display:flex;align-items:center;gap:8px">
         ${renderStars(s.session_id, s.starred, starId)}
         <strong>${s.message_count} messages</strong>
@@ -588,9 +589,16 @@ async function loadBrowseSessions() {
       </div>
     </div>
   `;}).join('');
+
+  if (browseLastViewedSession) {
+    const el = $('#browse-content').querySelector(`[data-session="${browseLastViewedSession}"]`);
+    if (el) el.scrollIntoView({ block: 'center' });
+    browseLastViewedSession = null;
+  }
 }
 
 async function showSession(sessionId) {
+  browseLastViewedSession = sessionId;
   $$('nav .tab').forEach(t => t.classList.remove('active'));
   $$('.view').forEach(v => v.classList.remove('active'));
   $$('nav .tab')[1].classList.add('active');
