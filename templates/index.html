@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Chats</title>
+<style>
+:root {
+  --bg: #1a1a2e; --surface: #16213e; --surface2: #0f3460;
+  --text: #e0e0e0; --text2: #a0a0b0; --accent: #e94560;
+  --accent2: #533483; --green: #4ecca3; --border: #2a2a4a;
+  --yellow: #f1c40f;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+a { color: var(--green); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Nav */
+nav { display: flex; align-items: center; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 16px; height: 48px; flex-shrink: 0; }
+nav .logo { font-weight: bold; font-size: 16px; color: var(--accent); margin-right: 24px; }
+nav .tabs { display: flex; gap: 4px; }
+nav .tab { padding: 8px 16px; cursor: pointer; border-radius: 6px 6px 0 0; color: var(--text2); font-size: 13px; }
+nav .tab:hover { background: var(--surface2); color: var(--text); }
+nav .tab.active { background: var(--surface2); color: var(--green); }
+nav .right { margin-left: auto; }
+nav .reindex-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: inherit; }
+nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
+
+/* Main */
+.main { flex: 1; overflow: hidden; display: flex; }
+.view { display: none; flex: 1; overflow: auto; padding: 20px; }
+.view.active { display: flex; flex-direction: column; }
+
+/* Search */
+.search-bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+.search-bar input, .search-bar select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 6px; font-family: inherit; font-size: 13px; }
+.search-bar input[type="search"] { flex: 1; min-width: 200px; }
+.search-bar input:focus, .search-bar select:focus { outline: none; border-color: var(--green); }
+.results-info { color: var(--text2); font-size: 12px; margin-bottom: 12px; }
+
+.filter-toggle { background: var(--surface2); border: 1px solid var(--border); color: var(--text2); padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: inherit; }
+.filter-toggle:hover { border-color: var(--green); color: var(--text); }
+.filter-toggle.active { border-color: var(--yellow); color: var(--yellow); }
+
+.result-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; }
+.result-card:hover { border-color: var(--accent2); }
+.result-meta { display: flex; gap: 12px; font-size: 11px; color: var(--text2); margin-bottom: 6px; flex-wrap: wrap; align-items: center; }
+.result-meta .project { color: var(--green); }
+.result-meta .branch { color: var(--accent); }
+.result-snippet { font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.result-snippet mark { background: var(--accent); color: white; padding: 0 2px; border-radius: 2px; }
+.result-actions { display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+.btn-sm { background: var(--surface2); border: 1px solid var(--border); color: var(--text2); padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; font-family: inherit; }
+.btn-sm:hover { color: var(--text); border-color: var(--green); }
+
+.pagination { display: flex; gap: 8px; margin-top: 12px; justify-content: center; }
+.pagination button { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 14px; border-radius: 4px; cursor: pointer; font-family: inherit; }
+.pagination button:hover { border-color: var(--green); }
+.pagination button:disabled { opacity: 0.4; cursor: default; }
+
+/* Star rating */
+.star-rating { display: inline-flex; gap: 1px; align-items: center; }
+.star-rating .star { background: none; border: none; cursor: pointer; font-size: 14px; padding: 0 1px; line-height: 1; color: var(--text2); opacity: 0.3; transition: opacity 0.1s; }
+.star-rating .star.filled { color: var(--yellow); opacity: 1; }
+.star-rating .star:hover { opacity: 0.8; }
+.star-rating:hover .star { opacity: 0.5; }
+.star-rating:hover .star.hovered { color: var(--yellow); opacity: 1; }
+
+/* Tags */
+.tag-chip { display: inline-block; background: var(--accent2); color: var(--text); padding: 1px 8px; border-radius: 10px; font-size: 10px; margin-right: 4px; cursor: pointer; }
+.tag-chip:hover { opacity: 0.8; }
+.tag-chip .remove-tag { margin-left: 4px; cursor: pointer; opacity: 0.6; }
+.tag-chip .remove-tag:hover { opacity: 1; }
+.tag-input-wrap { display: inline-flex; align-items: center; position: relative; }
+.tag-input-wrap input { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-family: inherit; width: 80px; }
+.tag-input-wrap input:focus { outline: none; border-color: var(--green); }
+.tag-autocomplete { position: absolute; top: 100%; left: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; z-index: 50; max-height: 120px; overflow-y: auto; display: none; min-width: 120px; }
+.tag-autocomplete .tag-option { padding: 4px 8px; cursor: pointer; font-size: 11px; }
+.tag-autocomplete .tag-option:hover { background: var(--surface2); }
+
+/* Browse */
+.browse-layout { display: flex; gap: 16px; flex: 1; overflow: hidden; }
+.browse-sidebar { width: 260px; flex-shrink: 0; overflow-y: auto; }
+.browse-content { flex: 1; overflow-y: auto; }
+.browse-filters { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+.project-item { padding: 10px 12px; cursor: pointer; border-radius: 6px; margin-bottom: 4px; font-size: 13px; }
+.project-item:hover { background: var(--surface2); }
+.project-item.active { background: var(--surface2); border-left: 3px solid var(--green); }
+.project-item .count { color: var(--text2); font-size: 11px; }
+.session-item { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 8px; cursor: pointer; position: relative; }
+.session-item:hover { border-color: var(--accent2); }
+.session-item .ts { color: var(--text2); font-size: 11px; }
+.session-item .first-msg { color: var(--text2); font-size: 12px; margin-top: 6px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; max-height: 3.6em; overflow: hidden; opacity: 0.7; }
+.session-item .session-actions { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.session-item.file-missing { opacity: 0.65; border-style: dashed; }
+
+/* Session detail */
+.session-detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.session-detail-header .back { cursor: pointer; color: var(--green); font-size: 13px; }
+.message-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; position: relative; }
+.message-card .ts { color: var(--text2); font-size: 11px; margin-bottom: 6px; }
+.message-card .content { font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.message-card .copy-btn { position: absolute; top: 8px; right: 8px; }
+
+/* Timeline */
+.timeline-controls { display: flex; gap: 8px; margin-bottom: 16px; }
+.timeline-controls select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-family: inherit; }
+.chart-container { flex: 1; overflow-x: auto; }
+.chart { display: flex; align-items: flex-end; gap: 2px; min-height: 300px; padding: 20px 0; }
+.chart-bar { display: flex; flex-direction: column; align-items: center; min-width: 18px; }
+.chart-bar .bar { width: 14px; border-radius: 3px 3px 0 0; transition: height 0.3s; cursor: pointer; position: relative; }
+.chart-bar .bar:hover { opacity: 0.8; }
+.chart-bar .label { font-size: 9px; color: var(--text2); margin-top: 4px; writing-mode: vertical-rl; transform: rotate(180deg); max-height: 60px; overflow: hidden; }
+.tooltip { position: fixed; background: var(--surface); border: 1px solid var(--border); padding: 6px 10px; border-radius: 4px; font-size: 11px; pointer-events: none; z-index: 100; display: none; }
+
+/* Stats */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: center; }
+.stat-card .num { font-size: 28px; font-weight: bold; color: var(--green); }
+.stat-card .label { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.stats-table { width: 100%; border-collapse: collapse; }
+.stats-table th, .stats-table td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.stats-table th { color: var(--text2); font-size: 11px; text-transform: uppercase; }
+
+.empty { color: var(--text2); text-align: center; padding: 40px; font-size: 14px; }
+.loading { color: var(--text2); text-align: center; padding: 20px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">Claude Chats</span>
+  <div class="tabs">
+    <div class="tab" data-view="search">Search</div>
+    <div class="tab active" data-view="browse">Browse</div>
+    <div class="tab" data-view="timeline">Timeline</div>
+    <div class="tab" data-view="stats">Stats</div>
+  </div>
+  <div class="right">
+    <button class="reindex-btn" onclick="doReindex()">Reindex</button>
+  </div>
+</nav>
+
+<div class="main">
+  <!-- Search View -->
+  <div class="view" id="view-search">
+    <div class="search-bar">
+      <input type="search" id="search-input" placeholder="Search your messages... (press / to focus)" autocomplete="off">
+      <select id="search-project"><option value="">All projects</option></select>
+      <select id="search-tag"><option value="">All tags</option></select>
+      <input type="date" id="search-from" title="From date">
+      <input type="date" id="search-to" title="To date">
+      <button class="filter-toggle" id="search-starred-btn" onclick="toggleSearchStarred()" title="Show only starred sessions">Starred</button>
+      <select id="search-min-stars" title="Minimum star rating">
+        <option value="">Min stars</option>
+        <option value="1">1+ stars</option>
+        <option value="2">2+ stars</option>
+        <option value="3">3+ stars</option>
+        <option value="4">4+ stars</option>
+        <option value="5">5 stars</option>
+      </select>
+    </div>
+    <div class="results-info" id="results-info"></div>
+    <div id="search-results"></div>
+    <div class="pagination" id="search-pagination"></div>
+  </div>
+
+  <!-- Browse View -->
+  <div class="view active" id="view-browse">
+    <div class="browse-layout">
+      <div class="browse-sidebar" id="browse-projects"></div>
+      <div class="browse-content" id="browse-content">
+        <div class="empty">Select a project to browse sessions</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timeline View -->
+  <div class="view" id="view-timeline">
+    <div class="timeline-controls">
+      <select id="timeline-granularity" onchange="loadTimeline()">
+        <option value="day">Daily</option>
+        <option value="week">Weekly</option>
+      </select>
+    </div>
+    <div class="chart-container">
+      <div class="chart" id="timeline-chart"></div>
+    </div>
+  </div>
+
+  <!-- Stats View -->
+  <div class="view" id="view-stats">
+    <div id="stats-content"><div class="loading">Loading stats...</div></div>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+
+let allTags = []; // cached tag list
+
+// Tabs
+$$('nav .tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    $$('nav .tab').forEach(t => t.classList.remove('active'));
+    $$('.view').forEach(v => v.classList.remove('active'));
+    tab.classList.add('active');
+    $(`#view-${tab.dataset.view}`).classList.add('active');
+    if (tab.dataset.view === 'browse') loadProjects();
+    if (tab.dataset.view === 'timeline') loadTimeline();
+    if (tab.dataset.view === 'stats') loadStats();
+  });
+});
+
+// Keyboard shortcut
+document.addEventListener('keydown', e => {
+  if (e.key === '/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) {
+    e.preventDefault();
+    $$('nav .tab')[0].click();
+    $('#search-input').focus();
+  }
+});
+
+// --- Tags cache ---
+async function refreshTags() {
+  const res = await fetch('/api/tags');
+  allTags = await res.json();
+  // Update search tag filter
+  const sel = $('#search-tag');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All tags</option>';
+  allTags.forEach(t => { const o = document.createElement('option'); o.value = t.tag; o.textContent = `${t.tag} (${t.count})`; sel.appendChild(o); });
+  sel.value = current;
+}
+refreshTags();
+
+// --- Star/Archive/Tag helpers ---
+function renderStars(sessionId, rating, containerId) {
+  let html = `<span class="star-rating" id="${containerId}"
+    onmouseleave="starHoverClear(this)">`;
+  for (let i = 1; i <= 5; i++) {
+    html += `<button class="star ${i <= rating ? 'filled' : ''}" data-val="${i}"
+      onclick="event.stopPropagation();setStarRating('${sessionId}','${containerId}',${i})"
+      onmouseenter="starHover(this,${i})">\u2605</button>`;
+  }
+  html += '</span>';
+  return html;
+}
+
+function starHover(el, val) {
+  const wrap = el.closest('.star-rating');
+  wrap.querySelectorAll('.star').forEach(s => {
+    s.classList.toggle('hovered', parseInt(s.dataset.val) <= val);
+  });
+}
+
+function starHoverClear(wrap) {
+  wrap.querySelectorAll('.star').forEach(s => s.classList.remove('hovered'));
+}
+
+async function setStarRating(sessionId, containerId, rating) {
+  const res = await fetch(`/api/session/${sessionId}/star`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ rating })
+  });
+  const data = await res.json();
+  const container = document.getElementById(containerId);
+  if (container) {
+    container.querySelectorAll('.star').forEach(s => {
+      s.classList.toggle('filled', parseInt(s.dataset.val) <= data.starred);
+    });
+  }
+}
+
+async function toggleArchive(sessionId) {
+  await fetch(`/api/session/${sessionId}/archive`, { method: 'PUT' });
+  // Refresh current browse view
+  if (browseSelectedProjects.size > 0) loadBrowseSessions();
+}
+
+async function setSessionTags(sessionId, tags) {
+  const res = await fetch(`/api/session/${sessionId}/tags`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tags }) });
+  const data = await res.json();
+  refreshTags();
+  return data.tags;
+}
+
+function renderTagChips(tags, sessionId, editable = true) {
+  let html = tags.map(t =>
+    `<span class="tag-chip" onclick="event.stopPropagation(); filterByTag('${esc(t)}')">${esc(t)}${editable ? `<span class="remove-tag" onclick="event.stopPropagation(); removeTag('${sessionId}', '${esc(t)}', this)">x</span>` : ''}</span>`
+  ).join('');
+  if (editable) {
+    html += `<span class="tag-input-wrap">
+      <input type="text" placeholder="+tag" onclick="event.stopPropagation()" onkeydown="handleTagKey(event, '${sessionId}')" onfocus="showTagAutocomplete(this)" oninput="showTagAutocomplete(this)" onblur="setTimeout(()=>hideTagAutocomplete(this),200)">
+      <div class="tag-autocomplete"></div>
+    </span>`;
+  }
+  return html;
+}
+
+function handleTagKey(e, sessionId) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const input = e.target;
+    const tag = input.value.trim();
+    if (!tag) return;
+    // Get current tags from sibling chips
+    const wrap = input.closest('.session-actions, .result-actions, .session-detail-header');
+    const currentTags = Array.from(wrap.querySelectorAll('.tag-chip')).map(c => c.textContent.replace(/x$/, '').trim());
+    if (!currentTags.includes(tag)) {
+      currentTags.push(tag);
+      setSessionTags(sessionId, currentTags).then(() => {
+        // Refresh the relevant view
+        if (browseSelectedProjects.size > 0 && $('#view-browse').classList.contains('active')) {
+          loadBrowseSessions();
+        } else {
+          doSearch(searchPage);
+        }
+      });
+    }
+    input.value = '';
+  } else if (e.key === 'Escape') {
+    e.target.value = '';
+    e.target.blur();
+  }
+}
+
+async function removeTag(sessionId, tag, el) {
+  const wrap = el.closest('.session-actions, .result-actions, .session-detail-header');
+  const currentTags = Array.from(wrap.querySelectorAll('.tag-chip')).map(c => c.textContent.replace(/x$/, '').trim()).filter(t => t !== tag);
+  await setSessionTags(sessionId, currentTags);
+  if (browseSelectedProjects.size > 0 && $('#view-browse').classList.contains('active')) {
+    loadBrowseSessions();
+  } else {
+    doSearch(searchPage);
+  }
+}
+
+function showTagAutocomplete(input) {
+  const dropdown = input.nextElementSibling;
+  const val = input.value.toLowerCase();
+  const matches = allTags.filter(t => !val || t.tag.toLowerCase().includes(val)).slice(0, 8);
+  if (!matches.length) { dropdown.style.display = 'none'; return; }
+  dropdown.innerHTML = matches.map(t =>
+    `<div class="tag-option" onmousedown="event.preventDefault(); pickTag(this, '${esc(t.tag)}')">${esc(t.tag)} (${t.count})</div>`
+  ).join('');
+  dropdown.style.display = 'block';
+}
+
+function hideTagAutocomplete(input) {
+  input.nextElementSibling.style.display = 'none';
+}
+
+function pickTag(el, tag) {
+  const input = el.closest('.tag-input-wrap').querySelector('input');
+  input.value = tag;
+  input.nextElementSibling.style.display = 'none';
+  // Simulate Enter
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+}
+
+function filterByTag(tag) {
+  // Switch to search, set tag filter
+  $$('nav .tab')[0].click();
+  $('#search-tag').value = tag;
+  doSearch(1);
+}
+
+// --- Search ---
+let searchPage = 1;
+let searchStarred = false;
+
+function toggleSearchStarred() {
+  searchStarred = !searchStarred;
+  $('#search-starred-btn').classList.toggle('active', searchStarred);
+  doSearch(1);
+}
+
+async function doSearch(page = 1) {
+  const q = $('#search-input').value.trim();
+  if (!q) { $('#search-results').innerHTML = ''; $('#results-info').textContent = ''; $('#search-pagination').innerHTML = ''; return; }
+  searchPage = page;
+  const params = new URLSearchParams({ q, page, project: $('#search-project').value, from: $('#search-from').value, to: $('#search-to').value });
+  if (searchStarred) params.set('starred', '1');
+  const minStars = $('#search-min-stars').value;
+  if (minStars) params.set('min_stars', minStars);
+  const tagVal = $('#search-tag').value;
+  if (tagVal) params.set('tag', tagVal);
+  const res = await fetch(`/api/search?${params}`);
+  const data = await res.json();
+  $('#results-info').textContent = `${data.total} result${data.total !== 1 ? 's' : ''} found`;
+  let srIdx = 0;
+  $('#search-results').innerHTML = data.results.map(r => {
+    const starId = `sr-star-${srIdx++}`;
+    return `
+    <div class="result-card">
+      <div class="result-meta">
+        ${renderStars(r.session_id, r.starred, starId)}
+        <span class="project">${esc(r.project)}</span>
+        ${r.git_branch ? `<span class="branch">${esc(r.git_branch)}</span>` : ''}
+        <span>${formatTs(r.timestamp)}</span>
+      </div>
+      <div class="result-snippet">${r.snippet}</div>
+      <div class="result-actions">
+        <button class="btn-sm" onclick="copyText(this, ${JSON.stringify(JSON.stringify(r.content))})">Copy</button>
+        <button class="btn-sm" onclick="showSession('${r.session_id}')">View session</button>
+        ${renderTagChips(r.tags || [], r.session_id)}
+      </div>
+    </div>
+  `;}).join('');
+  const totalPages = Math.ceil(data.total / (data.per_page || 20));
+  let pg = '';
+  if (totalPages > 1) {
+    pg += `<button ${page <= 1 ? 'disabled' : ''} onclick="doSearch(${page-1})">Prev</button>`;
+    pg += `<span style="color:var(--text2);font-size:12px;align-self:center">Page ${page} of ${totalPages}</span>`;
+    pg += `<button ${page >= totalPages ? 'disabled' : ''} onclick="doSearch(${page+1})">Next</button>`;
+  }
+  $('#search-pagination').innerHTML = pg;
+}
+
+let searchTimeout;
+$('#search-input').addEventListener('input', () => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => doSearch(1), 300); });
+$('#search-project').addEventListener('change', () => doSearch(1));
+$('#search-from').addEventListener('change', () => doSearch(1));
+$('#search-to').addEventListener('change', () => doSearch(1));
+$('#search-tag').addEventListener('change', () => doSearch(1));
+$('#search-min-stars').addEventListener('change', () => doSearch(1));
+
+// Populate project filter
+fetch('/api/projects').then(r => r.json()).then(projects => {
+  const sel = $('#search-project');
+  projects.forEach(p => { const o = document.createElement('option'); o.value = p.project; o.textContent = `${p.project} (${p.message_count})`; sel.appendChild(o); });
+});
+
+// Default to Browse view with all projects selected
+loadProjects();
+
+// --- Browse ---
+let browseSelectedProjects = new Set();
+let browseShowArchived = false;
+let browseStarredOnly = false;
+let browseTagFilter = '';
+let browseMinStars = '';
+let browseSort = 'date_desc';
+let browseSortProjects = 'chrono'; // 'chrono' or 'alpha'
+let browseAllProjects = []; // cached project list from API
+
+async function loadProjects() {
+  const res = await fetch('/api/projects');
+  browseAllProjects = await res.json();
+  if (browseSelectedProjects.size === 0 && browseAllProjects.length > 0) {
+    browseAllProjects.forEach(p => browseSelectedProjects.add(p.project));
+  }
+  renderProjectSidebar();
+  if (browseSelectedProjects.size > 0) loadBrowseSessions();
+}
+
+function renderProjectSidebar() {
+  let projects = [...browseAllProjects];
+  if (browseSortProjects === 'alpha') {
+    projects.sort((a, b) => a.project.localeCompare(b.project));
+  }
+  // browseSortProjects === 'chrono' keeps API order (last_ts DESC)
+
+  const toolbar = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+    <button class="btn-sm" onclick="selectAllProjects()">Select All</button>
+    <button class="btn-sm" onclick="clearProjectSelection()">Clear</button>
+    <select class="btn-sm" onchange="browseSortProjects=this.value;renderProjectSidebar()" style="font-family:inherit;font-size:11px;cursor:pointer">
+      <option value="chrono" ${browseSortProjects==='chrono'?'selected':''}>Recent first</option>
+      <option value="alpha" ${browseSortProjects==='alpha'?'selected':''}>A \u2192 Z</option>
+    </select>
+  </div>`;
+
+  $('#browse-projects').innerHTML = toolbar + projects.map(p => `
+    <div class="project-item ${browseSelectedProjects.has(p.project) ? 'active' : ''}" data-project="${esc(p.project)}">
+      ${esc(p.project)}
+      <div class="count">${p.session_count} sessions \u00b7 ${p.message_count} messages</div>
+    </div>
+  `).join('');
+
+  $('#browse-projects').querySelectorAll('.project-item').forEach(el => {
+    if (!el.dataset.project) return;
+    el.addEventListener('click', function(e) {
+      toggleProject(this.dataset.project, e);
+    });
+  });
+}
+
+function toggleProject(project, event) {
+  if (event && (event.metaKey || event.ctrlKey)) {
+    if (browseSelectedProjects.has(project)) {
+      browseSelectedProjects.delete(project);
+    } else {
+      browseSelectedProjects.add(project);
+    }
+  } else {
+    if (browseSelectedProjects.size === 1 && browseSelectedProjects.has(project)) {
+      browseSelectedProjects.clear();
+    } else {
+      browseSelectedProjects.clear();
+      browseSelectedProjects.add(project);
+    }
+  }
+  renderProjectSidebar();
+  loadBrowseSessions();
+}
+
+function selectAllProjects() {
+  browseAllProjects.forEach(p => browseSelectedProjects.add(p.project));
+  renderProjectSidebar();
+  loadBrowseSessions();
+}
+
+function clearProjectSelection() {
+  browseSelectedProjects.clear();
+  renderProjectSidebar();
+  loadBrowseSessions();
+}
+
+async function loadBrowseSessions() {
+  if (browseSelectedProjects.size === 0) {
+    $('#browse-content').innerHTML = '<div class="empty">Select a project to browse sessions</div>';
+    return;
+  }
+
+  const projectParam = Array.from(browseSelectedProjects).join(',');
+  const params = new URLSearchParams({ project: projectParam });
+  if (browseShowArchived) params.set('archived', '1');
+  if (browseStarredOnly) params.set('starred', '1');
+  if (browseMinStars) params.set('min_stars', browseMinStars);
+  if (browseTagFilter) params.set('tag', browseTagFilter);
+  if (browseSort) params.set('sort', browseSort);
+  const res = await fetch(`/api/sessions?${params}`);
+  const sessions = await res.json();
+
+  let filtersHtml = `<div class="browse-filters">
+    <button class="filter-toggle ${browseStarredOnly ? 'active' : ''}" onclick="browseStarredOnly=!browseStarredOnly;loadBrowseSessions()">Starred</button>
+    <select class="filter-toggle" onchange="browseMinStars=this.value;if(this.value)browseStarredOnly=false;loadBrowseSessions()" style="font-family:inherit;font-size:12px">
+      <option value="">Min stars</option>
+      ${[1,2,3,4,5].map(n => `<option value="${n}" ${browseMinStars==n ? 'selected' : ''}>${n}+ stars</option>`).join('')}
+    </select>
+    <select class="filter-toggle" onchange="browseSort=this.value;loadBrowseSessions()" style="font-family:inherit;font-size:12px">
+      <option value="date_desc" ${browseSort==='date_desc'?'selected':''}>Newest first</option>
+      <option value="date_asc" ${browseSort==='date_asc'?'selected':''}>Oldest first</option>
+      <option value="stars_desc" ${browseSort==='stars_desc'?'selected':''}>Most stars</option>
+      <option value="stars_asc" ${browseSort==='stars_asc'?'selected':''}>Fewest stars</option>
+    </select>
+    <button class="filter-toggle ${browseShowArchived ? 'active' : ''}" onclick="browseShowArchived=!browseShowArchived;loadBrowseSessions()">Show archived</button>
+    <select class="filter-toggle" onchange="browseTagFilter=this.value;loadBrowseSessions()" style="font-family:inherit;font-size:12px">
+      <option value="">All tags</option>
+      ${allTags.map(t => `<option value="${esc(t.tag)}" ${t.tag === browseTagFilter ? 'selected' : ''}>${esc(t.tag)} (${t.count})</option>`).join('')}
+    </select>
+  </div>`;
+
+  if (!sessions.length) {
+    $('#browse-content').innerHTML = filtersHtml + '<div class="empty">No sessions found</div>';
+    return;
+  }
+  let bsIdx = 0;
+  $('#browse-content').innerHTML = filtersHtml + sessions.map(s => {
+    const starId = `bs-star-${bsIdx++}`;
+    return `
+    <div class="session-item${s.file_missing ? ' file-missing' : ''}" onclick="showSession('${s.session_id}')">
+      <div style="display:flex;align-items:center;gap:8px">
+        ${renderStars(s.session_id, s.starred, starId)}
+        <strong>${s.message_count} messages</strong>
+        ${s.file_missing ? '<span style="color:var(--text2);font-size:11px;opacity:0.7" title="Source transcript file deleted from disk">&#x1f6ab; deleted</span>' : ''}
+        ${browseSelectedProjects.size > 1 ? `<span style="color:var(--green);font-size:11px">${esc(s.project)}</span>` : ''}
+      </div>
+      <div class="ts">${formatTs(s.first_ts)} \u2192 ${formatTs(s.last_ts)}</div>
+      ${s.first_message ? `<div class="first-msg">${esc(s.first_message)}</div>` : ''}
+      <div class="session-actions">
+        ${renderTagChips(s.tags || [], s.session_id)}
+        <button class="btn-sm" onclick="event.stopPropagation();toggleArchive('${s.session_id}')">Archive</button>
+      </div>
+    </div>
+  `;}).join('');
+}
+
+async function showSession(sessionId) {
+  $$('nav .tab').forEach(t => t.classList.remove('active'));
+  $$('.view').forEach(v => v.classList.remove('active'));
+  $$('nav .tab')[1].classList.add('active');
+  $('#view-browse').classList.add('active');
+
+  const [msgRes, metaRes] = await Promise.all([
+    fetch(`/api/session/${sessionId}`),
+    fetch(`/api/session/${sessionId}/meta`),
+  ]);
+  const messages = await msgRes.json();
+  const meta = await metaRes.json();
+  const starred = meta.starred;
+  const tags = meta.tags;
+
+  $('#browse-content').innerHTML = `
+    <div class="session-detail-header">
+      <span class="back" onclick="browseSelectedProjects.size ? loadBrowseSessions() : loadProjects()">\u2190 Back</span>
+      ${renderStars(sessionId, starred, 'detail-stars')}
+      <span style="color:var(--text2);font-size:12px">${messages.length} messages \u00b7 ${messages[0]?.project || ''}</span>
+      <button class="btn-sm" onclick="toggleArchive('${sessionId}')">Archive</button>
+      ${renderTagChips(tags, sessionId)}
+    </div>
+    ${messages.map(m => `
+      <div class="message-card">
+        <div class="ts">${formatTs(m.timestamp)}${m.git_branch ? ` \u00b7 ${esc(m.git_branch)}` : ''}</div>
+        <div class="content">${esc(m.content)}</div>
+        <button class="btn-sm copy-btn" onclick="copyText(this, ${JSON.stringify(JSON.stringify(m.content))})">Copy</button>
+      </div>
+    `).join('')}
+  `;
+}
+
+// --- Timeline ---
+const projectColors = {};
+const palette = ['#e94560','#4ecca3','#533483','#f39c12','#3498db','#e74c3c','#2ecc71','#9b59b6','#1abc9c','#e67e22'];
+let colorIdx = 0;
+function getColor(project) {
+  if (!projectColors[project]) projectColors[project] = palette[colorIdx++ % palette.length];
+  return projectColors[project];
+}
+
+async function loadTimeline() {
+  const g = $('#timeline-granularity').value;
+  const res = await fetch(`/api/timeline?granularity=${g}`);
+  const data = await res.json();
+  if (!data.length) { $('#timeline-chart').innerHTML = '<div class="empty">No data</div>'; return; }
+
+  const periods = {};
+  let maxCount = 0;
+  data.forEach(d => {
+    if (!periods[d.period]) periods[d.period] = {};
+    periods[d.period][d.project] = (periods[d.period][d.project] || 0) + d.count;
+  });
+  Object.values(periods).forEach(p => { const t = Object.values(p).reduce((a,b)=>a+b,0); if(t>maxCount) maxCount=t; });
+
+  const maxH = 280;
+  $('#timeline-chart').innerHTML = Object.entries(periods).map(([period, projects]) => {
+    const total = Object.values(projects).reduce((a,b)=>a+b,0);
+    const h = Math.max(4, (total / maxCount) * maxH);
+    const segments = Object.entries(projects).map(([proj, cnt]) => {
+      const sh = (cnt / total) * h;
+      return `<div class="bar" style="height:${sh}px;background:${getColor(proj)}" data-tip="${period}: ${proj} (${cnt})"></div>`;
+    }).join('');
+    const label = period.length > 10 ? period.slice(5) : period;
+    return `<div class="chart-bar"><div style="display:flex;flex-direction:column">${segments}</div><div class="label">${label}</div></div>`;
+  }).join('');
+
+  $$('.chart-bar .bar').forEach(bar => {
+    bar.addEventListener('mouseenter', e => {
+      const tip = $('#tooltip');
+      tip.textContent = bar.dataset.tip;
+      tip.style.display = 'block';
+      tip.style.left = e.clientX + 10 + 'px';
+      tip.style.top = e.clientY - 30 + 'px';
+    });
+    bar.addEventListener('mouseleave', () => { $('#tooltip').style.display = 'none'; });
+  });
+}
+
+// --- Stats ---
+async function loadStats() {
+  const res = await fetch('/api/stats');
+  const data = await res.json();
+  let html = `
+    <div class="stats-grid">
+      <div class="stat-card"><div class="num">${data.total_messages}</div><div class="label">Messages</div></div>
+      <div class="stat-card"><div class="num">${data.total_sessions}</div><div class="label">Sessions</div></div>
+      <div class="stat-card"><div class="num">${data.total_projects}</div><div class="label">Projects</div></div>
+    </div>
+    <h3 style="color:var(--text2);margin-bottom:12px;font-size:13px">PER PROJECT</h3>
+    <table class="stats-table">
+      <tr><th>Project</th><th>Messages</th><th>Sessions</th><th>First</th><th>Last</th></tr>
+      ${data.per_project.map(p => `
+        <tr><td style="color:var(--green)">${esc(p.project)}</td><td>${p.messages}</td><td>${p.sessions}</td>
+        <td style="color:var(--text2)">${formatTs(p.first_ts)}</td><td style="color:var(--text2)">${formatTs(p.last_ts)}</td></tr>
+      `).join('')}
+    </table>
+    <h3 style="color:var(--text2);margin:24px 0 12px;font-size:13px">MOST ACTIVE DAYS</h3>
+    <table class="stats-table">
+      <tr><th>Day</th><th>Messages</th></tr>
+      ${data.most_active_days.map(d => `<tr><td>${d.day}</td><td>${d.count}</td></tr>`).join('')}
+    </table>
+  `;
+  $('#stats-content').innerHTML = html;
+}
+
+// --- Reindex ---
+async function doReindex() {
+  const btn = $('nav .reindex-btn');
+  btn.textContent = 'Reindexing...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/reindex', { method: 'POST' });
+    const data = await res.json();
+    btn.textContent = `Done! ${data.total_messages} msgs`;
+    setTimeout(() => { btn.textContent = 'Reindex'; btn.disabled = false; }, 2000);
+  } catch(e) {
+    btn.textContent = 'Error';
+    setTimeout(() => { btn.textContent = 'Reindex'; btn.disabled = false; }, 2000);
+  }
+}
+
+// --- Helpers ---
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function formatTs(ts) {
+  if (!ts) return '';
+  try { const d = new Date(ts); return d.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) + ' ' + d.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'}); }
+  catch { return ts; }
+}
+function copyText(btn, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.textContent; btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = orig, 1000);
+  });
+}
+</script>
+</body>
+</html>
