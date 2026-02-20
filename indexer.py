@@ -88,7 +88,8 @@ def init_db(conn: sqlite3.Connection):
         CREATE TABLE IF NOT EXISTS session_meta (
             session_id TEXT PRIMARY KEY,
             starred INTEGER DEFAULT 0,
-            archived INTEGER DEFAULT 0
+            archived INTEGER DEFAULT 0,
+            hidden INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS session_tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,6 +103,11 @@ def init_db(conn: sqlite3.Connection):
     # Migrate: add file_missing column if missing (for existing databases)
     try:
         conn.execute("ALTER TABLE sessions ADD COLUMN file_missing INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    # Migrate: add hidden column if missing (for existing databases)
+    try:
+        conn.execute("ALTER TABLE session_meta ADD COLUMN hidden INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass  # column already exists
     # FTS5 virtual table

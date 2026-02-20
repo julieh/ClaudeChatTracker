@@ -61,7 +61,7 @@ def search():
 
     fts_query = q.replace('"', '""')
 
-    where_clauses = []
+    where_clauses = ["NOT EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = m.session_id AND sh.hidden = 1)"]
     params = []
 
     if project:
@@ -86,7 +86,7 @@ def search():
         where_clauses.append("EXISTS (SELECT 1 FROM session_tags st WHERE st.session_id = m.session_id AND st.tag = ?)")
         params.append(tag)
 
-    where_sql = (" AND " + " AND ".join(where_clauses)) if where_clauses else ""
+    where_sql = " AND " + " AND ".join(where_clauses)
 
     count_sql = f"""
         SELECT COUNT(*) FROM messages_fts fts
@@ -117,7 +117,9 @@ def projects():
         SELECT project, COUNT(*) as message_count,
                COUNT(DISTINCT session_id) as session_count,
                MIN(timestamp) as first_ts, MAX(timestamp) as last_ts
-        FROM messages GROUP BY project ORDER BY last_ts DESC
+        FROM messages
+        WHERE NOT EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = messages.session_id AND sh.hidden = 1)
+        GROUP BY project ORDER BY last_ts DESC
     """).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -133,7 +135,7 @@ def sessions():
     sort = request.args.get("sort", "date_desc").strip()
     conn = get_db()
 
-    where = []
+    where = ["NOT EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = s.session_id AND sh.hidden = 1)"]
     params = []
     if project:
         projects = [p.strip() for p in project.split(",") if p.strip()]
@@ -198,19 +200,20 @@ def session_detail(session_id):
 def timeline():
     granularity = request.args.get("granularity", "day")
     conn = get_db()
+    hidden_filter = "AND NOT EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = messages.session_id AND sh.hidden = 1)"
     if granularity == "week":
         # Group by ISO week
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT strftime('%Y-W%W', timestamp) as period,
                    project, COUNT(*) as count
-            FROM messages WHERE timestamp != ''
+            FROM messages WHERE timestamp != '' {hidden_filter}
             GROUP BY period, project ORDER BY period
         """).fetchall()
     else:
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT substr(timestamp, 1, 10) as period,
                    project, COUNT(*) as count
-            FROM messages WHERE timestamp != ''
+            FROM messages WHERE timestamp != '' {hidden_filter}
             GROUP BY period, project ORDER BY period
         """).fetchall()
     conn.close()
@@ -220,19 +223,21 @@ def timeline():
 @app.route("/api/stats")
 def stats():
     conn = get_db()
-    total_messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-    total_sessions = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-    total_projects = conn.execute("SELECT COUNT(DISTINCT project) FROM messages").fetchone()[0]
+    hidden_filter = "WHERE NOT EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = messages.session_id AND sh.hidden = 1)"
+    hidden_filter_and = "AND NOT EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = messages.session_id AND sh.hidden = 1)"
+    total_messages = conn.execute(f"SELECT COUNT(*) FROM messages {hidden_filter}").fetchone()[0]
+    total_sessions = conn.execute("SELECT COUNT(*) FROM sessions WHERE NOT EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = sessions.session_id AND sh.hidden = 1)").fetchone()[0]
+    total_projects = conn.execute(f"SELECT COUNT(DISTINCT project) FROM messages {hidden_filter}").fetchone()[0]
 
-    per_project = conn.execute("""
+    per_project = conn.execute(f"""
         SELECT project, COUNT(*) as messages, COUNT(DISTINCT session_id) as sessions,
                MIN(timestamp) as first_ts, MAX(timestamp) as last_ts
-        FROM messages GROUP BY project ORDER BY messages DESC
+        FROM messages {hidden_filter} GROUP BY project ORDER BY messages DESC
     """).fetchall()
 
-    most_active = conn.execute("""
+    most_active = conn.execute(f"""
         SELECT substr(timestamp, 1, 10) as day, COUNT(*) as count
-        FROM messages WHERE timestamp != ''
+        FROM messages WHERE timestamp != '' {hidden_filter_and}
         GROUP BY day ORDER BY count DESC LIMIT 10
     """).fetchall()
 
@@ -301,6 +306,19 @@ def toggle_archive(session_id):
     conn.commit()
     conn.close()
     return jsonify({"archived": bool(new_val)})
+
+
+@app.route("/api/session/<session_id>/hide", methods=["PUT"])
+def hide_session(session_id):
+    conn = get_db()
+    row = conn.execute("SELECT hidden FROM session_meta WHERE session_id = ?", [session_id]).fetchone()
+    if row:
+        conn.execute("UPDATE session_meta SET hidden = 1 WHERE session_id = ?", [session_id])
+    else:
+        conn.execute("INSERT INTO session_meta (session_id, starred, archived, hidden) VALUES (?, 0, 0, 1)", [session_id])
+    conn.commit()
+    conn.close()
+    return jsonify({"hidden": True})
 
 
 @app.route("/api/session/<session_id>/tags", methods=["PUT"])

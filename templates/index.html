@@ -283,6 +283,13 @@ async function toggleArchive(sessionId) {
   if (browseSelectedProjects.size > 0) loadBrowseSessions();
 }
 
+async function hideSession(sessionId) {
+  if (!confirm('Remove this session from the app? It will no longer appear anywhere.')) return;
+  await fetch(`/api/session/${sessionId}/hide`, { method: 'PUT' });
+  if (browseSelectedProjects.size > 0) loadBrowseSessions();
+  else loadProjects();
+}
+
 async function setSessionTags(sessionId, tags) {
   const res = await fetch(`/api/session/${sessionId}/tags`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tags }) });
   const data = await res.json();
@@ -577,6 +584,7 @@ async function loadBrowseSessions() {
       <div class="session-actions">
         ${renderTagChips(s.tags || [], s.session_id)}
         <button class="btn-sm" onclick="event.stopPropagation();toggleArchive('${s.session_id}')">Archive</button>
+        <button class="btn-sm" onclick="event.stopPropagation();hideSession('${s.session_id}')" title="Remove from app (keeps data in DB)">Delete</button>
       </div>
     </div>
   `;}).join('');
@@ -603,6 +611,7 @@ async function showSession(sessionId) {
       ${renderStars(sessionId, starred, 'detail-stars')}
       <span style="color:var(--text2);font-size:12px">${messages.length} messages \u00b7 ${messages[0]?.project || ''}</span>
       <button class="btn-sm" onclick="toggleArchive('${sessionId}')">Archive</button>
+      <button class="btn-sm" onclick="hideSession('${sessionId}')" title="Remove from app (keeps data in DB)">Delete</button>
       ${renderTagChips(tags, sessionId)}
     </div>
     ${messages.map(m => `
