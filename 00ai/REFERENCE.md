@@ -114,6 +114,9 @@ requirements.txt       # Python dependencies
 pip install -r requirements.txt
 python app.py
 # Runs initial index, then serves at http://localhost:5111
+
+# Stop the process already running on port 5111
+lsof -ti:5111 | xargs kill
 ```
 
 ## Data Source

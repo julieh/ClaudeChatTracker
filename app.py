@@ -54,12 +54,7 @@ def search():
     per_page = 20
     offset = (page - 1) * per_page
 
-    if not q:
-        return jsonify({"results": [], "total": 0, "page": page})
-
     conn = get_db()
-
-    fts_query = q.replace('"', '""')
 
     where_clauses = ["NOT EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = m.session_id AND sh.hidden = 1)"]
     params = []
@@ -86,24 +81,43 @@ def search():
         where_clauses.append("EXISTS (SELECT 1 FROM session_tags st WHERE st.session_id = m.session_id AND st.tag = ?)")
         params.append(tag)
 
-    where_sql = " AND " + " AND ".join(where_clauses)
+    # If no query text and no filters besides the hidden check, return empty
+    has_filters = project or date_from or date_to or min_stars or starred == "1" or tag
+    if not q and not has_filters:
+        return jsonify({"results": [], "total": 0, "page": page})
 
-    count_sql = f"""
-        SELECT COUNT(*) FROM messages_fts fts
-        JOIN messages m ON m.id = fts.rowid
-        WHERE messages_fts MATCH ? {where_sql}
-    """
-    total = conn.execute(count_sql, [fts_query] + params).fetchone()[0]
+    where_sql = " AND ".join(where_clauses)
 
-    results_sql = f"""
-        SELECT m.*, snippet(messages_fts, 0, '<mark>', '</mark>', '...', 40) as snippet
-        FROM messages_fts fts
-        JOIN messages m ON m.id = fts.rowid
-        WHERE messages_fts MATCH ? {where_sql}
-        ORDER BY m.timestamp DESC
-        LIMIT ? OFFSET ?
-    """
-    rows = conn.execute(results_sql, [fts_query] + params + [per_page, offset]).fetchall()
+    if q:
+        fts_query = q.replace('"', '""')
+        count_sql = f"""
+            SELECT COUNT(*) FROM messages_fts fts
+            JOIN messages m ON m.id = fts.rowid
+            WHERE messages_fts MATCH ? AND {where_sql}
+        """
+        total = conn.execute(count_sql, [fts_query] + params).fetchone()[0]
+
+        results_sql = f"""
+            SELECT m.*, snippet(messages_fts, 0, '<mark>', '</mark>', '...', 40) as snippet
+            FROM messages_fts fts
+            JOIN messages m ON m.id = fts.rowid
+            WHERE messages_fts MATCH ? AND {where_sql}
+            ORDER BY m.timestamp DESC
+            LIMIT ? OFFSET ?
+        """
+        rows = conn.execute(results_sql, [fts_query] + params + [per_page, offset]).fetchall()
+    else:
+        count_sql = f"SELECT COUNT(*) FROM messages m WHERE {where_sql}"
+        total = conn.execute(count_sql, params).fetchone()[0]
+
+        results_sql = f"""
+            SELECT m.*, substr(m.content, 1, 200) as snippet
+            FROM messages m
+            WHERE {where_sql}
+            ORDER BY m.timestamp DESC
+            LIMIT ? OFFSET ?
+        """
+        rows = conn.execute(results_sql, params + [per_page, offset]).fetchall()
 
     results = _attach_session_meta(conn, [dict(r) for r in rows])
     conn.close()
