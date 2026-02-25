@@ -136,6 +136,7 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
     <div class="tab active" data-view="browse">Browse</div>
     <div class="tab" data-view="timeline">Timeline</div>
     <div class="tab" data-view="stats">Stats</div>
+    <div class="tab" data-view="deleted">Deleted</div>
   </div>
   <div class="right">
     <button class="reindex-btn" onclick="doReindex()">Reindex</button>
@@ -189,6 +190,16 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
     </div>
   </div>
 
+  <!-- Deleted View -->
+  <div class="view" id="view-deleted">
+    <div class="browse-layout">
+      <div class="browse-sidebar" id="deleted-projects"></div>
+      <div class="browse-content" id="deleted-content">
+        <div class="empty">No deleted sessions</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Stats View -->
   <div class="view" id="view-stats">
     <div id="stats-content"><div class="loading">Loading stats...</div></div>
@@ -213,6 +224,7 @@ $$('nav .tab').forEach(tab => {
     if (tab.dataset.view === 'browse') loadProjects();
     if (tab.dataset.view === 'timeline') loadTimeline();
     if (tab.dataset.view === 'stats') loadStats();
+    if (tab.dataset.view === 'deleted') loadDeletedProjects();
   });
 });
 
@@ -704,6 +716,165 @@ async function loadStats() {
     </table>
   `;
   $('#stats-content').innerHTML = html;
+}
+
+// --- Deleted ---
+let deletedSelectedProjects = new Set();
+let deletedAllProjects = [];
+let deletedSortProjects = 'chrono';
+let deletedStarredOnly = false;
+let deletedMinStars = '';
+let deletedTagFilter = '';
+let deletedSort = 'date_desc';
+
+async function loadDeletedProjects() {
+  const res = await fetch('/api/deleted/projects');
+  deletedAllProjects = await res.json();
+  if (deletedSelectedProjects.size === 0 && deletedAllProjects.length > 0) {
+    deletedAllProjects.forEach(p => deletedSelectedProjects.add(p.project));
+  }
+  // Remove stale selections
+  const valid = new Set(deletedAllProjects.map(p => p.project));
+  for (const p of deletedSelectedProjects) { if (!valid.has(p)) deletedSelectedProjects.delete(p); }
+  renderDeletedSidebar();
+  loadDeletedSessions();
+}
+
+function renderDeletedSidebar() {
+  let projects = [...deletedAllProjects];
+  if (deletedSortProjects === 'alpha') projects.sort((a, b) => a.project.localeCompare(b.project));
+
+  const toolbar = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+    <button class="btn-sm" onclick="deletedAllProjects.forEach(p=>deletedSelectedProjects.add(p.project));renderDeletedSidebar();loadDeletedSessions()">Select All</button>
+    <button class="btn-sm" onclick="deletedSelectedProjects.clear();renderDeletedSidebar();loadDeletedSessions()">Clear</button>
+    <select class="btn-sm" onchange="deletedSortProjects=this.value;renderDeletedSidebar()" style="font-family:inherit;font-size:11px;cursor:pointer">
+      <option value="chrono" ${deletedSortProjects==='chrono'?'selected':''}>Recent first</option>
+      <option value="alpha" ${deletedSortProjects==='alpha'?'selected':''}>A \u2192 Z</option>
+    </select>
+  </div>`;
+
+  $('#deleted-projects').innerHTML = toolbar + projects.map(p => `
+    <div class="project-item ${deletedSelectedProjects.has(p.project) ? 'active' : ''}" data-project="${esc(p.project)}">
+      ${esc(p.project)}
+      <div class="count">${p.session_count} sessions</div>
+    </div>
+  `).join('');
+
+  $('#deleted-projects').querySelectorAll('.project-item').forEach(el => {
+    if (!el.dataset.project) return;
+    el.addEventListener('click', function(e) {
+      toggleDeletedProject(this.dataset.project, e);
+    });
+  });
+}
+
+function toggleDeletedProject(project, event) {
+  if (event && (event.metaKey || event.ctrlKey)) {
+    if (deletedSelectedProjects.has(project)) deletedSelectedProjects.delete(project);
+    else deletedSelectedProjects.add(project);
+  } else {
+    if (deletedSelectedProjects.size === 1 && deletedSelectedProjects.has(project)) {
+      deletedSelectedProjects.clear();
+    } else {
+      deletedSelectedProjects.clear();
+      deletedSelectedProjects.add(project);
+    }
+  }
+  renderDeletedSidebar();
+  loadDeletedSessions();
+}
+
+async function loadDeletedSessions() {
+  if (deletedSelectedProjects.size === 0 && deletedAllProjects.length > 0) {
+    $('#deleted-content').innerHTML = '<div class="empty">Select a project to browse deleted sessions</div>';
+    return;
+  }
+  if (deletedAllProjects.length === 0) {
+    $('#deleted-content').innerHTML = '<div class="empty">No deleted sessions</div>';
+    return;
+  }
+
+  const projectParam = Array.from(deletedSelectedProjects).join(',');
+  const params = new URLSearchParams({ project: projectParam });
+  if (deletedStarredOnly) params.set('starred', '1');
+  if (deletedMinStars) params.set('min_stars', deletedMinStars);
+  if (deletedTagFilter) params.set('tag', deletedTagFilter);
+  if (deletedSort) params.set('sort', deletedSort);
+  const res = await fetch(`/api/deleted?${params}`);
+  const sessions = await res.json();
+
+  let filtersHtml = `<div class="browse-filters">
+    <button class="filter-toggle ${deletedStarredOnly ? 'active' : ''}" onclick="deletedStarredOnly=!deletedStarredOnly;loadDeletedSessions()">Starred</button>
+    <select class="filter-toggle" onchange="deletedMinStars=this.value;if(this.value)deletedStarredOnly=false;loadDeletedSessions()" style="font-family:inherit;font-size:12px">
+      <option value="">Min stars</option>
+      ${[1,2,3,4,5].map(n => `<option value="${n}" ${deletedMinStars==n ? 'selected' : ''}>${n}+ stars</option>`).join('')}
+    </select>
+    <select class="filter-toggle" onchange="deletedSort=this.value;loadDeletedSessions()" style="font-family:inherit;font-size:12px">
+      <option value="date_desc" ${deletedSort==='date_desc'?'selected':''}>Newest first</option>
+      <option value="date_asc" ${deletedSort==='date_asc'?'selected':''}>Oldest first</option>
+      <option value="stars_desc" ${deletedSort==='stars_desc'?'selected':''}>Most stars</option>
+      <option value="stars_asc" ${deletedSort==='stars_asc'?'selected':''}>Fewest stars</option>
+    </select>
+    <select class="filter-toggle" onchange="deletedTagFilter=this.value;loadDeletedSessions()" style="font-family:inherit;font-size:12px">
+      <option value="">All tags</option>
+      ${allTags.map(t => `<option value="${esc(t.tag)}" ${t.tag === deletedTagFilter ? 'selected' : ''}>${esc(t.tag)} (${t.count})</option>`).join('')}
+    </select>
+  </div>`;
+
+  if (!sessions.length) {
+    $('#deleted-content').innerHTML = filtersHtml + '<div class="empty">No deleted sessions match filters</div>';
+    return;
+  }
+
+  let dsIdx = 0;
+  $('#deleted-content').innerHTML = filtersHtml + sessions.map(s => {
+    const starId = `ds-star-${dsIdx++}`;
+    return `
+    <div class="session-item" data-session="${s.session_id}" onclick="showDeletedSession('${s.session_id}')">
+      <div style="display:flex;align-items:center;gap:8px">
+        ${renderStars(s.session_id, s.starred, starId)}
+        <strong>${s.message_count} messages</strong>
+        ${deletedSelectedProjects.size > 1 ? `<span style="color:var(--green);font-size:11px">${esc(s.project)}</span>` : ''}
+      </div>
+      <div class="ts">${formatTs(s.first_ts)} \u2192 ${formatTs(s.last_ts)}</div>
+      ${s.first_message ? `<div class="first-msg">${esc(s.first_message)}</div>` : ''}
+      <div class="session-actions">
+        ${renderTagChips(s.tags || [], s.session_id, false)}
+        <button class="btn-sm" style="border-color:var(--green);color:var(--green)" onclick="event.stopPropagation();undeleteSession('${s.session_id}')">Undelete</button>
+      </div>
+    </div>
+  `;}).join('');
+}
+
+async function undeleteSession(sessionId) {
+  await fetch(`/api/session/${sessionId}/unhide`, { method: 'PUT' });
+  loadDeletedProjects();
+}
+
+async function showDeletedSession(sessionId) {
+  const [msgRes, metaRes] = await Promise.all([
+    fetch(`/api/session/${sessionId}`),
+    fetch(`/api/session/${sessionId}/meta`),
+  ]);
+  const messages = await msgRes.json();
+  const meta = await metaRes.json();
+
+  $('#deleted-content').innerHTML = `
+    <div class="session-detail-header">
+      <span class="back" onclick="loadDeletedSessions()">\u2190 Back</span>
+      ${renderStars(sessionId, meta.starred, 'del-detail-stars')}
+      <span style="color:var(--text2);font-size:12px">${messages.length} messages \u00b7 ${messages[0]?.project || ''}</span>
+      <button class="btn-sm" style="border-color:var(--green);color:var(--green)" onclick="undeleteSession('${sessionId}')">Undelete</button>
+      ${renderTagChips(meta.tags || [], sessionId, false)}
+    </div>
+    ${messages.map(m => `
+      <div class="message-card">
+        <div class="ts">${formatTs(m.timestamp)}${m.git_branch ? ` \u00b7 ${esc(m.git_branch)}` : ''}</div>
+        <div class="content">${esc(m.content)}</div>
+        <button class="btn-sm copy-btn" onclick="copyText(this, ${JSON.stringify(JSON.stringify(m.content))})">Copy</button>
+      </div>
+    `).join('')}
+  `;
 }
 
 // --- Reindex ---

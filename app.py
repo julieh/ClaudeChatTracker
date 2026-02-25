@@ -321,6 +321,89 @@ def hide_session(session_id):
     return jsonify({"hidden": True})
 
 
+@app.route("/api/session/<session_id>/unhide", methods=["PUT"])
+def unhide_session(session_id):
+    conn = get_db()
+    conn.execute("UPDATE session_meta SET hidden = 0 WHERE session_id = ?", [session_id])
+    conn.commit()
+    conn.close()
+    return jsonify({"hidden": False})
+
+
+@app.route("/api/deleted")
+def deleted_sessions():
+    """List hidden/deleted sessions with same filters as /api/sessions."""
+    project = request.args.get("project", "").strip()
+    starred_only = request.args.get("starred", "").strip()
+    min_stars = request.args.get("min_stars", "").strip()
+    tag = request.args.get("tag", "").strip()
+    sort = request.args.get("sort", "date_desc").strip()
+    conn = get_db()
+
+    where = ["EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = s.session_id AND sh.hidden = 1)"]
+    params = []
+    if project:
+        projects = [p.strip() for p in project.split(",") if p.strip()]
+        if len(projects) == 1:
+            where.append("s.project = ?")
+            params.append(projects[0])
+        elif projects:
+            placeholders = ",".join("?" * len(projects))
+            where.append(f"s.project IN ({placeholders})")
+            params.extend(projects)
+    if min_stars:
+        try:
+            min_stars_int = int(min_stars)
+        except ValueError:
+            return jsonify({"error": "min_stars must be an integer"}), 400
+        where.append("EXISTS (SELECT 1 FROM session_meta sm WHERE sm.session_id = s.session_id AND sm.starred >= ?)")
+        params.append(min_stars_int)
+    elif starred_only == "1":
+        where.append("EXISTS (SELECT 1 FROM session_meta sm WHERE sm.session_id = s.session_id AND sm.starred >= 1)")
+    if tag:
+        where.append("EXISTS (SELECT 1 FROM session_tags st WHERE st.session_id = s.session_id AND st.tag = ?)")
+        params.append(tag)
+
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+    sort_map = {
+        "date_desc": "s.last_ts DESC",
+        "date_asc": "s.last_ts ASC",
+        "stars_desc": "COALESCE(sm2.starred, 0) DESC, s.last_ts DESC",
+        "stars_asc": "COALESCE(sm2.starred, 0) ASC, s.last_ts DESC",
+    }
+    order_sql = sort_map.get(sort, "s.last_ts DESC")
+    join_sql = " LEFT JOIN session_meta sm2 ON sm2.session_id = s.session_id" if sort.startswith("stars") else ""
+    rows = conn.execute(f"SELECT s.* FROM sessions s{join_sql}{where_sql} ORDER BY {order_sql}", params).fetchall()
+
+    result = []
+    for r in rows:
+        d = dict(r)
+        first_msg = conn.execute("""
+            SELECT content FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 1
+        """, [d["session_id"]]).fetchone()
+        d["first_message"] = first_msg["content"][:300] if first_msg else ""
+        result.append(d)
+
+    _attach_session_meta(conn, result)
+    conn.close()
+    return jsonify(result)
+
+
+@app.route("/api/deleted/projects")
+def deleted_projects():
+    """List projects that have at least one hidden session."""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT s.project, COUNT(*) as session_count, SUM(s.message_count) as message_count,
+               MIN(s.first_ts) as first_ts, MAX(s.last_ts) as last_ts
+        FROM sessions s
+        WHERE EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = s.session_id AND sh.hidden = 1)
+        GROUP BY s.project ORDER BY last_ts DESC
+    """).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
 @app.route("/api/session/<session_id>/tags", methods=["PUT"])
 def set_tags(session_id):
     data = request.get_json() or {}
