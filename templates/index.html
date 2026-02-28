@@ -106,12 +106,15 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
 /* Timeline */
 .timeline-controls { display: flex; gap: 8px; margin-bottom: 16px; }
 .timeline-controls select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-family: inherit; }
-.chart-container { flex: 1; overflow-x: auto; }
+.chart-container { overflow-x: auto; }
 .chart { display: flex; align-items: flex-end; gap: 2px; min-height: 300px; padding: 20px 0; }
 .chart-bar { display: flex; flex-direction: column; align-items: center; min-width: 18px; }
 .chart-bar .bar { width: 14px; border-radius: 3px 3px 0 0; transition: height 0.3s; cursor: pointer; position: relative; }
 .chart-bar .bar:hover { opacity: 0.8; }
 .chart-bar .label { font-size: 9px; color: var(--text2); margin-top: 4px; writing-mode: vertical-rl; transform: rotate(180deg); max-height: 60px; overflow: hidden; }
+.timeline-legend { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.timeline-legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); }
+.timeline-legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 .tooltip { position: fixed; background: var(--surface); border: 1px solid var(--border); padding: 6px 10px; border-radius: 4px; font-size: 11px; pointer-events: none; z-index: 100; display: none; }
 
 /* Stats */
@@ -189,6 +192,7 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
     <div class="chart-container">
       <div class="chart" id="timeline-chart"></div>
     </div>
+    <div class="timeline-legend" id="timeline-legend"></div>
   </div>
 
   <!-- Deleted View -->
@@ -442,7 +446,7 @@ async function doSearch(page = 1) {
       </div>
       <div class="result-snippet">${r.snippet}</div>
       <div class="result-actions">
-        <button class="btn-sm" onclick="copyText(this, ${JSON.stringify(JSON.stringify(r.content))})">Copy</button>
+        <button class="btn-sm" data-copy="${esc(r.content).replace(/"/g,'&quot;')}" onclick="copyText(this)">Copy</button>
         <button class="btn-sm" onclick="showSession('${r.session_id}')">View session</button>
         ${renderTagChips(r.tags || [], r.session_id)}
       </div>
@@ -654,7 +658,7 @@ async function showSession(sessionId) {
       <div class="message-card">
         <div class="ts">${formatTs(m.timestamp)}${m.git_branch ? ` \u00b7 ${esc(m.git_branch)}` : ''}</div>
         <div class="content">${esc(m.content)}</div>
-        <button class="btn-sm copy-btn" onclick="copyText(this, ${JSON.stringify(JSON.stringify(m.content))})">Copy</button>
+        <button class="btn-sm copy-btn" data-copy="${esc(m.content).replace(/"/g,'&quot;')}" onclick="copyText(this)">Copy</button>
       </div>
     `).join('')}
   `;
@@ -689,11 +693,18 @@ async function loadTimeline() {
     const h = Math.max(4, (total / maxCount) * maxH);
     const segments = Object.entries(projects).map(([proj, cnt]) => {
       const sh = (cnt / total) * h;
-      return `<div class="bar" style="height:${sh}px;background:${getColor(proj)}" data-tip="${period}: ${proj} (${cnt})"></div>`;
+      return `<div class="bar" style="height:${sh}px;background:${getColor(proj)}" data-tip="${period}: ${proj} (${cnt})" data-project="${proj}"></div>`;
     }).join('');
     const label = period.length > 10 ? period.slice(5) : period;
     return `<div class="chart-bar"><div style="display:flex;flex-direction:column">${segments}</div><div class="label">${label}</div></div>`;
   }).join('');
+
+  const projectCounts = {};
+  data.forEach(d => { projectCounts[d.project] = (projectCounts[d.project] || 0) + d.count; });
+  const sortedProjects = Object.entries(projectCounts).sort((a, b) => b[1] - a[1]);
+  $('#timeline-legend').innerHTML = sortedProjects.map(([p, cnt]) =>
+    `<div class="timeline-legend-item" data-project="${p}"><div class="timeline-legend-swatch" style="background:${getColor(p)}"></div>${p} (${cnt})</div>`
+  ).join('');
 
   $$('.chart-bar .bar').forEach(bar => {
     bar.addEventListener('mouseenter', e => {
@@ -702,8 +713,32 @@ async function loadTimeline() {
       tip.style.display = 'block';
       tip.style.left = e.clientX + 10 + 'px';
       tip.style.top = e.clientY - 30 + 'px';
+      const proj = bar.dataset.project;
+      $$('.timeline-legend-item').forEach(el => {
+        el.style.opacity = el.dataset.project === proj ? '1' : '0.3';
+        el.style.fontWeight = el.dataset.project === proj ? 'bold' : '';
+      });
     });
-    bar.addEventListener('mouseleave', () => { $('#tooltip').style.display = 'none'; });
+    bar.addEventListener('mouseleave', () => {
+      $('#tooltip').style.display = 'none';
+      $$('.timeline-legend-item').forEach(el => { el.style.opacity = '1'; el.style.fontWeight = ''; });
+    });
+  });
+
+  $$('.timeline-legend-item').forEach(item => {
+    item.style.cursor = 'pointer';
+    item.addEventListener('mouseenter', () => {
+      const proj = item.dataset.project;
+      $$('.chart-bar .bar').forEach(bar => { bar.style.opacity = bar.dataset.project === proj ? '1' : '0.15'; });
+      $$('.timeline-legend-item').forEach(el => {
+        el.style.opacity = el.dataset.project === proj ? '1' : '0.3';
+        el.style.fontWeight = el.dataset.project === proj ? 'bold' : '';
+      });
+    });
+    item.addEventListener('mouseleave', () => {
+      $$('.chart-bar .bar').forEach(bar => { bar.style.opacity = '1'; });
+      $$('.timeline-legend-item').forEach(el => { el.style.opacity = '1'; el.style.fontWeight = ''; });
+    });
   });
 }
 
@@ -887,7 +922,7 @@ async function showDeletedSession(sessionId) {
       <div class="message-card">
         <div class="ts">${formatTs(m.timestamp)}${m.git_branch ? ` \u00b7 ${esc(m.git_branch)}` : ''}</div>
         <div class="content">${esc(m.content)}</div>
-        <button class="btn-sm copy-btn" onclick="copyText(this, ${JSON.stringify(JSON.stringify(m.content))})">Copy</button>
+        <button class="btn-sm copy-btn" data-copy="${esc(m.content).replace(/"/g,'&quot;')}" onclick="copyText(this)">Copy</button>
       </div>
     `).join('')}
   `;
@@ -916,11 +951,30 @@ function formatTs(ts) {
   try { const d = new Date(ts); return d.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) + ' ' + d.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'}); }
   catch { return ts; }
 }
-function copyText(btn, text) {
-  navigator.clipboard.writeText(text).then(() => {
-    const orig = btn.textContent; btn.textContent = 'Copied!';
-    setTimeout(() => btn.textContent = orig, 1000);
-  });
+function copyText(btn) {
+  const text = btn.dataset.copy;
+  const orig = btn.textContent;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = orig, 1000);
+    }).catch(() => {
+      copyFallback(btn, text, orig);
+    });
+  } else {
+    copyFallback(btn, text, orig);
+  }
+}
+function copyFallback(btn, text, origLabel) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;left:-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch(e) {}
+  document.body.removeChild(ta);
+  btn.textContent = 'Copied!';
+  setTimeout(() => btn.textContent = origLabel, 1000);
 }
 </script>
 </body>
