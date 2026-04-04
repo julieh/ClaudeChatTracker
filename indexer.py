@@ -65,6 +65,7 @@ def init_db(conn: sqlite3.Connection):
             project TEXT,
             timestamp TEXT,
             content TEXT,
+            assistant_response TEXT DEFAULT '',
             cwd TEXT,
             git_branch TEXT,
             jsonl_file TEXT
@@ -110,22 +111,36 @@ def init_db(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE session_meta ADD COLUMN hidden INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass  # column already exists
-    # FTS5 virtual table
+    # Migrate: add assistant_response column if missing (for existing databases)
+    try:
+        conn.execute("ALTER TABLE messages ADD COLUMN assistant_response TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    # FTS5 virtual table — drop and recreate if schema changed (e.g. added assistant_response)
+    try:
+        result = conn.execute("PRAGMA table_info(messages_fts)").fetchall()
+        col_names = [r[1] for r in result]
+        if 'assistant_response' not in col_names:
+            conn.execute("DROP TABLE IF EXISTS messages_fts")
+    except sqlite3.OperationalError:
+        pass
     try:
         conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
-            USING fts5(content, project, content_rowid='id', tokenize='porter unicode61');
+            USING fts5(content, assistant_response, project, content_rowid='id', tokenize='porter unicode61');
         """)
     except sqlite3.OperationalError:
         pass  # already exists
 
 
 def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
-    """Parse a single JSONL file and insert human messages."""
+    """Parse a single JSONL file and insert human messages with assistant responses."""
     # Remove old messages from this file
     conn.execute("DELETE FROM messages WHERE jsonl_file = ?", (jsonl_path,))
 
-    messages = []
+    # Collect human messages and pair each with the assistant response that follows it
+    human_messages = []  # list of [uuid, session_id, project, ts, content, cwd, branch, file, assistant_response]
+    last_assistant_text = ""
     try:
         with open(jsonl_path, "r") as f:
             for line in f:
@@ -136,38 +151,51 @@ def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
                     record = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if not is_human_message(record):
-                    continue
-                content = extract_content(record)
-                if not content:
-                    continue
-                messages.append((
-                    record.get("uuid", ""),
-                    record.get("sessionId", ""),
-                    project,
-                    record.get("timestamp", ""),
-                    content,
-                    record.get("cwd", ""),
-                    record.get("gitBranch", ""),
-                    jsonl_path,
-                ))
+
+                if record.get("type") == "assistant":
+                    text = extract_content(record)
+                    if text:
+                        last_assistant_text = text
+                elif is_human_message(record):
+                    # Attach accumulated assistant response to the PREVIOUS human message
+                    if human_messages and last_assistant_text:
+                        human_messages[-1][-1] = last_assistant_text
+                    last_assistant_text = ""
+                    content = extract_content(record)
+                    if not content:
+                        continue
+                    human_messages.append([
+                        record.get("uuid", ""),
+                        record.get("sessionId", ""),
+                        project,
+                        record.get("timestamp", ""),
+                        content,
+                        record.get("cwd", ""),
+                        record.get("gitBranch", ""),
+                        jsonl_path,
+                        "",  # assistant_response placeholder
+                    ])
     except (OSError, UnicodeDecodeError):
         return
 
-    if messages:
+    # Attach final assistant response to the last human message
+    if human_messages and last_assistant_text:
+        human_messages[-1][-1] = last_assistant_text
+
+    if human_messages:
         conn.executemany("""
             INSERT OR REPLACE INTO messages
-            (uuid, session_id, project, timestamp, content, cwd, git_branch, jsonl_file)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, messages)
+            (uuid, session_id, project, timestamp, content, cwd, git_branch, jsonl_file, assistant_response)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, human_messages)
 
 
 def rebuild_fts(conn: sqlite3.Connection):
     """Rebuild the FTS index from the messages table."""
     conn.execute("DELETE FROM messages_fts")
     conn.execute("""
-        INSERT INTO messages_fts(rowid, content, project)
-        SELECT id, content, project FROM messages
+        INSERT INTO messages_fts(rowid, content, assistant_response, project)
+        SELECT id, content, COALESCE(assistant_response, ''), project FROM messages
     """)
 
 
@@ -201,6 +229,13 @@ def run_index(full_rebuild: bool = False) -> dict:
     t0 = time.time()
     conn = sqlite3.connect(str(DB_PATH))
     init_db(conn)
+
+    # Auto-detect if assistant_response column was just added and needs backfill
+    msg_count = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    if not full_rebuild and msg_count > 0:
+        has_any = conn.execute("SELECT COUNT(*) FROM messages WHERE assistant_response != ''").fetchone()[0]
+        if has_any == 0:
+            full_rebuild = True
 
     if full_rebuild:
         conn.execute("DELETE FROM messages")

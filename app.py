@@ -98,7 +98,8 @@ def search():
         total = conn.execute(count_sql, [fts_query] + params).fetchone()[0]
 
         results_sql = f"""
-            SELECT m.*, snippet(messages_fts, 0, '<mark>', '</mark>', '...', 40) as snippet
+            SELECT m.*, snippet(messages_fts, 0, '<mark>', '</mark>', '...', 40) as snippet,
+                   snippet(messages_fts, 1, '<mark>', '</mark>', '...', 40) as assistant_snippet
             FROM messages_fts fts
             JOIN messages m ON m.id = fts.rowid
             WHERE messages_fts MATCH ? AND {where_sql}
