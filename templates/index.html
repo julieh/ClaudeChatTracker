@@ -145,6 +145,7 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
     <div class="tab" data-view="deleted">Deleted</div>
   </div>
   <div class="right">
+    <button class="reindex-btn" onclick="doBackup()">Backup</button>
     <button class="reindex-btn" onclick="doReindex()">Reindex</button>
   </div>
 </nav>
@@ -932,6 +933,22 @@ async function showDeletedSession(sessionId) {
       </div>
     `).join('')}
   `;
+}
+
+// --- Backup ---
+async function doBackup() {
+  const btn = document.querySelectorAll('nav .reindex-btn')[0];
+  btn.textContent = 'Backing up...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/backup', { method: 'POST' });
+    const data = await res.json();
+    btn.textContent = 'Backed up!';
+    setTimeout(() => { btn.textContent = 'Backup'; btn.disabled = false; }, 2000);
+  } catch(e) {
+    btn.textContent = 'Error';
+    setTimeout(() => { btn.textContent = 'Backup'; btn.disabled = false; }, 2000);
+  }
 }
 
 // --- Reindex ---

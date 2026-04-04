@@ -40,6 +40,31 @@ def is_human_message(record: dict) -> bool:
     )
 
 
+def is_command_message(record: dict) -> bool:
+    """Check if a JSONL record is a slash command or skill invocation."""
+    if record.get("type") != "user":
+        return False
+    if record.get("isMeta", False):
+        return False
+    if "sourceToolAssistantUUID" in record:
+        return False
+    if "permissionMode" in record:
+        return False  # already handled by is_human_message
+    content = extract_content(record)
+    return "<command-name>" in content
+
+
+def format_command_content(content: str) -> str:
+    """Extract a clean slash command string from XML-tagged content."""
+    match = re.search(r"<command-name>(.*?)</command-name>", content)
+    if match:
+        cmd = match.group(1)
+        args_match = re.search(r"<command-args>(.*?)</command-args>", content, re.DOTALL)
+        args = args_match.group(1).strip() if args_match else ""
+        return f"{cmd} {args}".strip() if args else cmd
+    return content
+
+
 def extract_content(record: dict) -> str:
     """Extract text content from a message record."""
     content = record.get("message", {}).get("content", "")
@@ -162,6 +187,24 @@ def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
                         human_messages[-1][-1] = last_assistant_text
                     last_assistant_text = ""
                     content = extract_content(record)
+                    if not content:
+                        continue
+                    human_messages.append([
+                        record.get("uuid", ""),
+                        record.get("sessionId", ""),
+                        project,
+                        record.get("timestamp", ""),
+                        content,
+                        record.get("cwd", ""),
+                        record.get("gitBranch", ""),
+                        jsonl_path,
+                        "",  # assistant_response placeholder
+                    ])
+                elif is_command_message(record):
+                    if human_messages and last_assistant_text:
+                        human_messages[-1][-1] = last_assistant_text
+                    last_assistant_text = ""
+                    content = format_command_content(extract_content(record))
                     if not content:
                         continue
                     human_messages.append([

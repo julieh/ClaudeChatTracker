@@ -1,6 +1,9 @@
 """Flask server for Claude Chats search app."""
 
+import shutil
 import sqlite3
+from datetime import datetime
+from pathlib import Path
 from flask import Flask, jsonify, request, render_template
 from indexer import run_index, DB_PATH
 
@@ -190,10 +193,15 @@ def sessions():
     result = []
     for r in rows:
         d = dict(r)
-        first_msg = conn.execute("""
-            SELECT content FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 1
-        """, [d["session_id"]]).fetchone()
-        d["first_message"] = first_msg["content"][:300] if first_msg else ""
+        first_msgs = conn.execute("""
+            SELECT content FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 2
+        """, [d["session_id"]]).fetchall()
+        first_content = ""
+        if first_msgs:
+            first_content = first_msgs[0]["content"]
+            if first_content.strip() == "/clear" and len(first_msgs) > 1:
+                first_content = first_msgs[1]["content"]
+        d["first_message"] = first_content[:300]
         result.append(d)
 
     _attach_session_meta(conn, result)
@@ -393,10 +401,15 @@ def deleted_sessions():
     result = []
     for r in rows:
         d = dict(r)
-        first_msg = conn.execute("""
-            SELECT content FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 1
-        """, [d["session_id"]]).fetchone()
-        d["first_message"] = first_msg["content"][:300] if first_msg else ""
+        first_msgs = conn.execute("""
+            SELECT content FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 2
+        """, [d["session_id"]]).fetchall()
+        first_content = ""
+        if first_msgs:
+            first_content = first_msgs[0]["content"]
+            if first_content.strip() == "/clear" and len(first_msgs) > 1:
+                first_content = first_msgs[1]["content"]
+        d["first_message"] = first_content[:300]
         result.append(d)
 
     _attach_session_meta(conn, result)
@@ -441,6 +454,16 @@ def all_tags():
     rows = conn.execute("SELECT tag, COUNT(*) as count FROM session_tags GROUP BY tag ORDER BY count DESC").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/backup", methods=["POST"])
+def backup():
+    backup_dir = Path.home() / "claudeChatBackups"
+    backup_dir.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H%M")
+    backup_path = backup_dir / f"{timestamp}_transcripts.db"
+    shutil.copy2(str(DB_PATH), str(backup_path))
+    return jsonify({"path": str(backup_path)})
 
 
 @app.route("/api/reindex", methods=["POST"])
