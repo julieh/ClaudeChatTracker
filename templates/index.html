@@ -611,11 +611,12 @@ async function loadBrowseSessions() {
     const starId = `bs-star-${bsIdx++}`;
     return `
     <div class="session-item${s.file_missing ? ' file-missing' : ''}" data-session="${s.session_id}" onclick="showSession('${s.session_id}')">
-      <div style="display:flex;align-items:center;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         ${renderStars(s.session_id, s.starred, starId)}
+        ${s.name || s.slug ? `<span style="color:var(--green);font-size:13px;font-weight:bold">${esc(s.name || s.slug)}</span>` : ''}
         <strong>${s.message_count} messages</strong>
         ${s.file_missing ? '<span style="color:var(--text2);font-size:11px;opacity:0.7" title="Source transcript file deleted from disk">&#x1f6ab; deleted</span>' : ''}
-        ${browseSelectedProjects.size > 1 ? `<span style="color:var(--green);font-size:11px">${esc(s.project)}</span>` : ''}
+        ${browseSelectedProjects.size > 1 ? `<span style="color:var(--text2);font-size:11px">${esc(s.project)}</span>` : ''}
       </div>
       <div class="ts">${formatTs(s.first_ts)} \u2192 ${formatTs(s.last_ts)}</div>
       ${s.first_message ? `<div class="first-msg">${esc(s.first_message)}</div>` : ''}
@@ -645,19 +646,27 @@ async function showSession(sessionId) {
     fetch(`/api/session/${sessionId}`),
     fetch(`/api/session/${sessionId}/meta`),
   ]);
-  const messages = await msgRes.json();
+  const data = await msgRes.json();
+  const messages = data.messages;
+  const session = data.session || {};
   const meta = await metaRes.json();
   const starred = meta.starred;
   const tags = meta.tags;
+  const displayName = session.name || session.slug || '';
 
   $('#browse-content').innerHTML = `
     <div class="session-detail-header">
       <span class="back" onclick="browseSelectedProjects.size ? loadBrowseSessions() : loadProjects()">\u2190 Back</span>
       ${renderStars(sessionId, starred, 'detail-stars')}
+      ${displayName ? `<strong style="font-size:14px">${esc(displayName)}</strong>` : ''}
       <span style="color:var(--text2);font-size:12px">${messages.length} messages \u00b7 ${messages[0]?.project || ''}</span>
       <button class="btn-sm" onclick="toggleArchive('${sessionId}')">Archive</button>
       <button class="btn-sm" onclick="hideSession('${sessionId}')" title="Remove from app (keeps data in DB)">Delete</button>
       ${renderTagChips(tags, sessionId)}
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;display:flex;align-items:center;gap:8px">
+      <code style="color:var(--green)">claude --resume ${sessionId}</code>
+      <button class="btn-sm copy-btn" onclick="navigator.clipboard.writeText('claude --resume ${sessionId}');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
     </div>
     ${messages.map(m => `
       <div class="message-card">
@@ -888,10 +897,11 @@ async function loadDeletedSessions() {
     const starId = `ds-star-${dsIdx++}`;
     return `
     <div class="session-item" data-session="${s.session_id}" onclick="showDeletedSession('${s.session_id}')">
-      <div style="display:flex;align-items:center;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         ${renderStars(s.session_id, s.starred, starId)}
+        ${s.name || s.slug ? `<span style="color:var(--green);font-size:13px;font-weight:bold">${esc(s.name || s.slug)}</span>` : ''}
         <strong>${s.message_count} messages</strong>
-        ${deletedSelectedProjects.size > 1 ? `<span style="color:var(--green);font-size:11px">${esc(s.project)}</span>` : ''}
+        ${deletedSelectedProjects.size > 1 ? `<span style="color:var(--text2);font-size:11px">${esc(s.project)}</span>` : ''}
       </div>
       <div class="ts">${formatTs(s.first_ts)} \u2192 ${formatTs(s.last_ts)}</div>
       ${s.first_message ? `<div class="first-msg">${esc(s.first_message)}</div>` : ''}
@@ -913,13 +923,17 @@ async function showDeletedSession(sessionId) {
     fetch(`/api/session/${sessionId}`),
     fetch(`/api/session/${sessionId}/meta`),
   ]);
-  const messages = await msgRes.json();
+  const data = await msgRes.json();
+  const messages = data.messages;
+  const session = data.session || {};
   const meta = await metaRes.json();
+  const displayName = session.name || session.slug || '';
 
   $('#deleted-content').innerHTML = `
     <div class="session-detail-header">
       <span class="back" onclick="loadDeletedSessions()">\u2190 Back</span>
       ${renderStars(sessionId, meta.starred, 'del-detail-stars')}
+      ${displayName ? `<strong style="font-size:14px">${esc(displayName)}</strong>` : ''}
       <span style="color:var(--text2);font-size:12px">${messages.length} messages \u00b7 ${messages[0]?.project || ''}</span>
       <button class="btn-sm" style="border-color:var(--green);color:var(--green)" onclick="undeleteSession('${sessionId}')">Undelete</button>
       ${renderTagChips(meta.tags || [], sessionId, false)}

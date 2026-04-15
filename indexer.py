@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
+SESSIONS_DIR = Path.home() / ".claude" / "sessions"
 DB_PATH = Path(__file__).parent / "transcripts.db"
 
 
@@ -101,7 +102,9 @@ def init_db(conn: sqlite3.Connection):
             first_ts TEXT,
             last_ts TEXT,
             message_count INTEGER DEFAULT 0,
-            file_missing INTEGER DEFAULT 0
+            file_missing INTEGER DEFAULT 0,
+            name TEXT DEFAULT '',
+            slug TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS index_meta (
             jsonl_file TEXT PRIMARY KEY,
@@ -141,6 +144,12 @@ def init_db(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE messages ADD COLUMN assistant_response TEXT DEFAULT ''")
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Migrate: add name/slug columns to sessions if missing
+    for col in ("name", "slug"):
+        try:
+            conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
     # FTS5 virtual table — drop and recreate if schema changed (e.g. added assistant_response)
     try:
         result = conn.execute("PRAGMA table_info(messages_fts)").fetchall()
@@ -158,14 +167,57 @@ def init_db(conn: sqlite3.Connection):
         pass  # already exists
 
 
+def load_session_names() -> dict:
+    """Read ~/.claude/sessions/*.json and return {sessionId: name}."""
+    names = {}
+    if not SESSIONS_DIR.exists():
+        return names
+    for f in SESSIONS_DIR.glob("*.json"):
+        try:
+            data = json.loads(f.read_text())
+            sid = data.get("sessionId", "")
+            name = data.get("name", "")
+            if sid and name:
+                names[sid] = name
+        except (json.JSONDecodeError, OSError):
+            continue
+    return names
+
+
+def _extract_slug(jsonl_path: str, session_slugs: dict):
+    """Quick scan of first few lines to grab sessionId and slug."""
+    try:
+        with open(jsonl_path, "r") as f:
+            for i, line in enumerate(f):
+                if i >= 5:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                sid = record.get("sessionId", "")
+                slug = record.get("slug", "")
+                if sid and slug:
+                    session_slugs[sid] = slug
+                    return
+    except (OSError, UnicodeDecodeError):
+        pass
+
+
 def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
-    """Parse a single JSONL file and insert human messages with assistant responses."""
+    """Parse a single JSONL file and insert human messages with assistant responses.
+    Returns (session_id, slug) extracted from records."""
     # Remove old messages from this file
     conn.execute("DELETE FROM messages WHERE jsonl_file = ?", (jsonl_path,))
 
     # Collect human messages and pair each with the assistant response that follows it
     human_messages = []  # list of [uuid, session_id, project, ts, content, cwd, branch, file, assistant_response]
     last_assistant_text = ""
+    slug = ""
+    file_session_id = ""
     try:
         with open(jsonl_path, "r") as f:
             for line in f:
@@ -176,6 +228,11 @@ def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
                     record = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+
+                if not slug and record.get("slug"):
+                    slug = record["slug"]
+                if not file_session_id and record.get("sessionId"):
+                    file_session_id = record["sessionId"]
 
                 if record.get("type") == "assistant":
                     text = extract_content(record)
@@ -219,7 +276,7 @@ def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
                         "",  # assistant_response placeholder
                     ])
     except (OSError, UnicodeDecodeError):
-        return
+        return "", ""
 
     # Attach final assistant response to the last human message
     if human_messages and last_assistant_text:
@@ -232,6 +289,8 @@ def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, human_messages)
 
+    return file_session_id, slug
+
 
 def rebuild_fts(conn: sqlite3.Connection):
     """Rebuild the FTS index from the messages table."""
@@ -242,7 +301,7 @@ def rebuild_fts(conn: sqlite3.Connection):
     """)
 
 
-def rebuild_sessions(conn: sqlite3.Connection):
+def rebuild_sessions(conn: sqlite3.Connection, session_names=None, session_slugs=None):
     """Rebuild session summary table, marking sessions whose source files are missing."""
     conn.execute("DELETE FROM sessions")
     conn.execute("""
@@ -251,6 +310,12 @@ def rebuild_sessions(conn: sqlite3.Connection):
         FROM messages
         GROUP BY session_id
     """)
+    if session_slugs:
+        for sid, s in session_slugs.items():
+            conn.execute("UPDATE sessions SET slug = ? WHERE session_id = ?", (s, sid))
+    if session_names:
+        for sid, n in session_names.items():
+            conn.execute("UPDATE sessions SET name = ? WHERE session_id = ?", (n, sid))
     # Mark sessions whose JSONL source files no longer exist on disk
     rows = conn.execute("""
         SELECT DISTINCT session_id, jsonl_file FROM messages
@@ -290,6 +355,7 @@ def run_index(full_rebuild: bool = False) -> dict:
         existing[row[0]] = row[1]
 
     files_indexed = 0
+    session_slugs = {}
     if PROJECTS_DIR.exists():
         for folder in sorted(PROJECTS_DIR.iterdir()):
             if not folder.is_dir():
@@ -299,8 +365,12 @@ def run_index(full_rebuild: bool = False) -> dict:
                 fpath = str(jsonl_file)
                 mtime = jsonl_file.stat().st_mtime
                 if not full_rebuild and fpath in existing and existing[fpath] >= mtime:
+                    # Still extract slug from skipped files for rebuild_sessions
+                    _extract_slug(fpath, session_slugs)
                     continue
-                index_file(conn, fpath, project)
+                sid, slug = index_file(conn, fpath, project)
+                if sid and slug:
+                    session_slugs[sid] = slug
                 conn.execute(
                     "INSERT OR REPLACE INTO index_meta (jsonl_file, mtime, indexed_at) VALUES (?, ?, ?)",
                     (fpath, mtime, time.time()),
@@ -308,7 +378,8 @@ def run_index(full_rebuild: bool = False) -> dict:
                 files_indexed += 1
 
     rebuild_fts(conn)
-    rebuild_sessions(conn)
+    session_names = load_session_names()
+    rebuild_sessions(conn, session_names=session_names, session_slugs=session_slugs)
     conn.commit()
 
     total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]

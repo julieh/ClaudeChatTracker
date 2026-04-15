@@ -212,11 +212,15 @@ def sessions():
 @app.route("/api/session/<session_id>")
 def session_detail(session_id):
     conn = get_db()
+    session = conn.execute("SELECT * FROM sessions WHERE session_id = ?", [session_id]).fetchone()
     rows = conn.execute("""
         SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC
     """, [session_id]).fetchall()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify({
+        "session": dict(session) if session else {},
+        "messages": [dict(r) for r in rows],
+    })
 
 
 @app.route("/api/timeline")
