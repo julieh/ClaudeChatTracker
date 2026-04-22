@@ -404,8 +404,12 @@ def _attach_session_meta(conn, results, session_id_key="session_id"):
     placeholders = ",".join("?" * len(session_ids))
     # Get meta
     meta_map = {}
-    for row in conn.execute(f"SELECT session_id, starred, archived FROM session_meta WHERE session_id IN ({placeholders})", session_ids):
-        meta_map[row["session_id"]] = {"starred": row["starred"] or 0, "archived": bool(row["archived"])}
+    for row in conn.execute(f"SELECT session_id, starred, archived, complete FROM session_meta WHERE session_id IN ({placeholders})", session_ids):
+        meta_map[row["session_id"]] = {
+            "starred": row["starred"] or 0,
+            "archived": bool(row["archived"]),
+            "complete": bool(row["complete"]),
+        }
     # Get tags
     tags_map = {}
     for row in conn.execute(f"SELECT session_id, tag FROM session_tags WHERE session_id IN ({placeholders})", session_ids):
@@ -415,6 +419,7 @@ def _attach_session_meta(conn, results, session_id_key="session_id"):
         meta = meta_map.get(sid, {})
         r["starred"] = meta.get("starred", 0)
         r["archived"] = meta.get("archived", False)
+        r["complete"] = meta.get("complete", False)
         r["tags"] = tags_map.get(sid, [])
     return results
 
@@ -525,6 +530,7 @@ def sessions():
     starred_only = request.args.get("starred", "").strip()
     min_stars = request.args.get("min_stars", "").strip()
     tag = request.args.get("tag", "").strip()
+    complete_filter = request.args.get("complete", "").strip()
     sort = request.args.get("sort", "date_desc").strip()
     conn = get_db()
 
@@ -553,6 +559,10 @@ def sessions():
         params.append(tag)
     if show_archived != "1":
         where.append("NOT EXISTS (SELECT 1 FROM session_meta sm WHERE sm.session_id = s.session_id AND sm.archived = 1)")
+    if complete_filter == "done":
+        where.append("EXISTS (SELECT 1 FROM session_meta sm WHERE sm.session_id = s.session_id AND sm.complete = 1)")
+    elif complete_filter == "open":
+        where.append("NOT EXISTS (SELECT 1 FROM session_meta sm WHERE sm.session_id = s.session_id AND sm.complete = 1)")
 
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
     sort_map = {
@@ -721,6 +731,21 @@ def hide_session(session_id):
     conn.commit()
     conn.close()
     return jsonify({"hidden": True})
+
+
+@app.route("/api/session/<session_id>/complete", methods=["PUT"])
+def toggle_complete(session_id):
+    conn = get_db()
+    row = conn.execute("SELECT complete FROM session_meta WHERE session_id = ?", [session_id]).fetchone()
+    if row:
+        new_val = 0 if row["complete"] else 1
+        conn.execute("UPDATE session_meta SET complete = ? WHERE session_id = ?", [new_val, session_id])
+    else:
+        new_val = 1
+        conn.execute("INSERT INTO session_meta (session_id, starred, archived, complete) VALUES (?, 0, 0, 1)", [session_id])
+    conn.commit()
+    conn.close()
+    return jsonify({"complete": bool(new_val)})
 
 
 @app.route("/api/session/<session_id>/unhide", methods=["PUT"])

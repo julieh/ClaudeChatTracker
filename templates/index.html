@@ -9,7 +9,7 @@
   --bg: #1a1a2e; --surface: #16213e; --surface2: #0f3460;
   --text: #e0e0e0; --text2: #fbfbfd; --accent: #e94560;
   --accent2: #533483; --green: #4ecca3; --border: #2a2a4a;
-  --yellow: #f1c40f;
+  --yellow: #f1c40f; --red: #ff4d4f;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
@@ -94,6 +94,11 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
 .session-item .first-msg { color: #fbfbfd; font-size: 12px; margin-top: 6px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; max-height: 3.6em; overflow: hidden; opacity: 0.7; }
 .session-item .session-actions { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
 .session-item.file-missing { opacity: 0.65; border-style: dashed; }
+
+.complete-check { position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; border: 3px solid var(--yellow); border-radius: 3px; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: 700; color: transparent; font-size: 16px; line-height: 1; padding: 0; font-family: inherit; }
+
+.complete-check:hover { opacity: 0.9; }
+.complete-check.checked { border-color: #6b7280; color: #6b7280; font-weight: 400; opacity: 0.6; }
 
 /* Session detail */
 .session-detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
@@ -187,9 +192,9 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
 <nav>
   <span class="logo">Claude Chats</span>
   <div class="tabs">
-    <div class="tab active" data-view="dashboard">Dashboard</div>
+    <div class="tab" data-view="dashboard">Dashboard</div>
     <div class="tab" data-view="search">Search</div>
-    <div class="tab" data-view="browse">Browse</div>
+    <div class="tab active" data-view="browse">Browse</div>
     <div class="tab" data-view="timeline">Timeline</div>
     <div class="tab" data-view="stats">Stats</div>
     <div class="tab" data-view="deleted">Deleted</div>
@@ -202,7 +207,7 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
 
 <div class="main">
   <!-- Dashboard View -->
-  <div class="view active" id="view-dashboard">
+  <div class="view" id="view-dashboard">
     <div class="dash-header">
       <h2>Live Claude Code sessions</h2>
       <div>
@@ -249,7 +254,7 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
   </div>
 
   <!-- Browse View -->
-  <div class="view" id="view-browse">
+  <div class="view active" id="view-browse">
     <div class="browse-layout">
       <div class="browse-sidebar" id="browse-projects"></div>
       <div class="browse-content" id="browse-content">
@@ -520,7 +525,7 @@ document.addEventListener('DOMContentLoaded', () => {
       else if (action === 'expand') { toggleTranscript(card); }
     });
   }
-  startDashboard();
+  loadProjects();
 });
 
 // Tabs
@@ -604,6 +609,18 @@ async function toggleArchive(sessionId) {
   await fetch(`/api/session/${sessionId}/archive`, { method: 'PUT' });
   // Refresh current browse view
   if (browseSelectedProjects.size > 0) loadBrowseSessions();
+}
+
+async function toggleComplete(sessionId, btn) {
+  const res = await fetch(`/api/session/${sessionId}/complete`, { method: 'PUT' });
+  const data = await res.json();
+  if (browseCompleteFilter) {
+    if (browseSelectedProjects.size > 0) loadBrowseSessions();
+  } else if (btn) {
+    btn.classList.toggle('checked', !!data.complete);
+    btn.title = data.complete ? 'Complete \u2014 click to reopen' : 'Mark complete';
+    btn.textContent = data.complete ? '\u2713' : '';
+  }
 }
 
 async function hideSession(sessionId) {
@@ -791,6 +808,7 @@ let browseSelectedProjects = new Set();
 let browseShowArchived = false;
 let browseStarredOnly = false;
 let browseTagFilter = '';
+let browseCompleteFilter = ''; // '', 'open', 'done'
 let browseMinStars = '';
 let browseSort = 'date_desc';
 let browseSortProjects = 'chrono'; // 'chrono' or 'alpha'
@@ -881,6 +899,7 @@ async function loadBrowseSessions() {
   if (browseStarredOnly) params.set('starred', '1');
   if (browseMinStars) params.set('min_stars', browseMinStars);
   if (browseTagFilter) params.set('tag', browseTagFilter);
+  if (browseCompleteFilter) params.set('complete', browseCompleteFilter);
   if (browseSort) params.set('sort', browseSort);
   const res = await fetch(`/api/sessions?${params}`);
   const sessions = await res.json();
@@ -902,6 +921,11 @@ async function loadBrowseSessions() {
       <option value="">All tags</option>
       ${allTags.map(t => `<option value="${esc(t.tag)}" ${t.tag === browseTagFilter ? 'selected' : ''}>${esc(t.tag)} (${t.count})</option>`).join('')}
     </select>
+    <select class="filter-toggle" onchange="browseCompleteFilter=this.value;loadBrowseSessions()" style="font-family:inherit;font-size:12px">
+      <option value="" ${browseCompleteFilter===''?'selected':''}>Open & Complete</option>
+      <option value="open" ${browseCompleteFilter==='open'?'selected':''}>Open</option>
+      <option value="done" ${browseCompleteFilter==='done'?'selected':''}>Complete</option>
+    </select>
   </div>`;
 
   if (!sessions.length) {
@@ -913,7 +937,8 @@ async function loadBrowseSessions() {
     const starId = `bs-star-${bsIdx++}`;
     return `
     <div class="session-item${s.file_missing ? ' file-missing' : ''}" data-session="${s.session_id}" onclick="showSession('${s.session_id}')">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <button class="complete-check${s.complete ? ' checked' : ''}" onclick="event.stopPropagation();toggleComplete('${s.session_id}', this)" title="${s.complete ? 'Complete \u2014 click to reopen' : 'Mark complete'}">${s.complete ? '\u2713' : ''}</button>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-right:28px">
         ${renderStars(s.session_id, s.starred, starId)}
         ${s.name || s.slug ? `<span style="color:var(--green);font-size:13px;font-weight:bold">${esc(s.name || s.slug)}</span>` : ''}
         <strong>${s.message_count} messages</strong>

@@ -118,7 +118,8 @@ def init_db(conn: sqlite3.Connection):
             session_id TEXT PRIMARY KEY,
             starred INTEGER DEFAULT 0,
             archived INTEGER DEFAULT 0,
-            hidden INTEGER DEFAULT 0
+            hidden INTEGER DEFAULT 0,
+            complete INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS session_tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,6 +138,11 @@ def init_db(conn: sqlite3.Connection):
     # Migrate: add hidden column if missing (for existing databases)
     try:
         conn.execute("ALTER TABLE session_meta ADD COLUMN hidden INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    # Migrate: add complete column if missing (for existing databases)
+    try:
+        conn.execute("ALTER TABLE session_meta ADD COLUMN complete INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass  # column already exists
     # Migrate: add assistant_response column if missing (for existing databases)

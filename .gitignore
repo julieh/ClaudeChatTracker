@@ -2,3 +2,6 @@ transcripts.db
 __pycache__/
 *.pyc
 .DS_Store
+.playwright-mcp/
+*.zip
+*.csv
