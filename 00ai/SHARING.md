@@ -112,3 +112,11 @@ Restart (or start new) Claude Code sessions to pick up the hooks. The Dashboard 
 - **"No module named flask"** — Run `pip3 install flask`.
 - **No sessions showing up** — Make sure you have Claude Code transcripts in `~/.claude/projects/`. The app only indexes JSONL files from that directory.
 - **Port 5111 in use** — Another instance may be running. Kill it or edit the port in `app.py`.
+
+## Updating (after git pull)
+
+Normally: just restart `python3 app.py`. Schema migrations and re-indexing are automatic.
+
+Manual steps are listed below, newest first. Find the entry just after your last pull and do everything from there upward.
+
+- **2026-04-22** (c7ef914) — New Dashboard view. To populate it with live sessions, add the 4 hooks from the "Optional: Enable live Dashboard" section above to `~/.claude/settings.json` and restart your Claude Code sessions. Skipping this is fine — the Dashboard just stays empty.
