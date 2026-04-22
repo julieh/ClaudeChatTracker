@@ -99,6 +99,7 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
 
 .complete-check:hover { opacity: 0.9; }
 .complete-check.checked { border-color: #6b7280; color: #6b7280; font-weight: 400; opacity: 0.6; }
+.complete-check.inline { position: static; top: auto; right: auto; }
 
 /* Session detail */
 .session-detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
@@ -114,6 +115,11 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
 .message-card .assistant-response.collapsed .assistant-label .caret { transform: rotate(-90deg); }
 .message-card .assistant-response.collapsed .assistant-text { display: none; }
 .message-card .assistant-text { font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; opacity: 0.85; }
+.message-card .user-label { font-size: 10px; color: var(--yellow); margin-bottom: 4px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+.message-card .user-label .caret { display: inline-block; transition: transform 0.15s; }
+.message-card .user-block.collapsed .user-label { margin-bottom: 0; }
+.message-card .user-block.collapsed .user-label .caret { transform: rotate(-90deg); }
+.message-card .user-block.collapsed .content { display: none; }
 
 /* Timeline */
 .timeline-controls { display: flex; gap: 8px; margin-bottom: 16px; }
@@ -980,11 +986,13 @@ async function showSession(sessionId) {
   const meta = await metaRes.json();
   const starred = meta.starred;
   const tags = meta.tags;
+  const complete = meta.complete;
   const displayName = session.name || session.slug || '';
 
   $('#browse-content').innerHTML = `
     <div class="session-detail-header">
       <span class="back" onclick="browseSelectedProjects.size ? loadBrowseSessions() : loadProjects()">\u2190 Back</span>
+      <button class="complete-check inline${complete ? ' checked' : ''}" onclick="toggleComplete('${sessionId}', this)" title="${complete ? 'Complete — click to reopen' : 'Mark complete'}">${complete ? '✓' : ''}</button>
       ${renderStars(sessionId, starred, 'detail-stars')}
       ${displayName ? `<strong style="font-size:14px">${esc(displayName)}</strong>` : ''}
       <span style="color:var(--text2);font-size:12px">${messages.length} messages \u00b7 ${messages[0]?.project || ''}</span>
@@ -999,7 +1007,10 @@ async function showSession(sessionId) {
     ${messages.map(m => `
       <div class="message-card">
         <div class="ts">${formatTs(m.timestamp)}${m.git_branch ? ` \u00b7 ${esc(m.git_branch)}` : ''}</div>
-        <div class="content">${esc(m.content)}</div>
+        <div class="user-block">
+          <div class="user-label" onclick="this.parentElement.classList.toggle('collapsed')"><span class="caret">▼</span>You</div>
+          <div class="content">${esc(m.content)}</div>
+        </div>
         ${m.assistant_response ? `<div class="assistant-response"><div class="assistant-label" onclick="this.parentElement.classList.toggle('collapsed')"><span class="caret">▼</span>Claude</div><div class="assistant-text">${esc(m.assistant_response)}</div></div>` : ''}
         <button class="btn-sm copy-btn" data-copy="${esc(m.content).replace(/"/g,'&quot;')}" onclick="copyText(this)">Copy</button>
       </div>

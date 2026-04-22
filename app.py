@@ -666,12 +666,13 @@ def stats():
 @app.route("/api/session/<session_id>/meta")
 def session_meta(session_id):
     conn = get_db()
-    meta = conn.execute("SELECT starred, archived FROM session_meta WHERE session_id = ?", [session_id]).fetchone()
+    meta = conn.execute("SELECT starred, archived, complete FROM session_meta WHERE session_id = ?", [session_id]).fetchone()
     tags = [r["tag"] for r in conn.execute("SELECT tag FROM session_tags WHERE session_id = ?", [session_id]).fetchall()]
     conn.close()
     return jsonify({
         "starred": (meta["starred"] or 0) if meta else 0,
         "archived": bool(meta["archived"]) if meta else False,
+        "complete": bool(meta["complete"]) if meta else False,
         "tags": tags,
     })
 
