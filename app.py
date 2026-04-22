@@ -2,12 +2,387 @@
 
 import shutil
 import sqlite3
-from datetime import datetime
+import threading
+import json
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from flask import Flask, jsonify, request, render_template
-from indexer import run_index, DB_PATH
+from indexer import (
+    run_index, DB_PATH, PROJECTS_DIR,
+    is_human_message, is_command_message, format_command_content, extract_content,
+    load_session_names, decode_folder_name,
+)
 
 app = Flask(__name__)
+
+# Live session state (in-memory, ephemeral). Populated by Claude Code hooks.
+_live_lock = threading.Lock()
+_live_sessions = {}          # session_id -> dict
+_recently_closed = []        # list of dicts, most-recent first, max 10
+_RECENTLY_CLOSED_MAX = 10
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _project_from_cwd(cwd):
+    if not cwd:
+        return ""
+    return cwd.rstrip("/").split("/")[-1] if cwd else ""
+
+
+def _hook_payload():
+    """Extract session info from hook JSON body. Claude Code hook payloads
+    include session_id, cwd, and transcript_path among other fields."""
+    data = request.get_json(silent=True) or {}
+    return {
+        "session_id": data.get("session_id") or data.get("sessionId") or "",
+        "cwd": data.get("cwd") or "",
+        "transcript_path": data.get("transcript_path") or data.get("transcriptPath") or "",
+    }
+
+
+def _upsert_live(session_id, state, cwd="", transcript_path=""):
+    if not session_id:
+        return
+    now = _now_iso()
+    existing = _live_sessions.get(session_id)
+    if existing:
+        existing["state"] = state
+        existing["updated_at"] = now
+        if cwd:
+            existing["cwd"] = cwd
+            existing["project"] = _project_from_cwd(cwd)
+        if transcript_path:
+            existing["transcript_path"] = transcript_path
+    else:
+        _live_sessions[session_id] = {
+            "session_id": session_id,
+            "state": state,
+            "cwd": cwd,
+            "project": _project_from_cwd(cwd),
+            "transcript_path": transcript_path,
+            "started_at": now,
+            "updated_at": now,
+        }
+
+
+@app.route("/api/hook/session-start", methods=["POST"])
+def hook_session_start():
+    p = _hook_payload()
+    with _live_lock:
+        _upsert_live(p["session_id"], "waiting", p["cwd"], p["transcript_path"])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/hook/user-prompt-submit", methods=["POST"])
+def hook_user_prompt_submit():
+    p = _hook_payload()
+    with _live_lock:
+        _upsert_live(p["session_id"], "working", p["cwd"], p["transcript_path"])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/hook/stop", methods=["POST"])
+def hook_stop():
+    p = _hook_payload()
+    with _live_lock:
+        _upsert_live(p["session_id"], "waiting", p["cwd"], p["transcript_path"])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/hook/session-end", methods=["POST"])
+def hook_session_end():
+    p = _hook_payload()
+    sid = p["session_id"]
+    if not sid:
+        return jsonify({"ok": True})
+    with _live_lock:
+        entry = _live_sessions.pop(sid, None)
+        if entry is None:
+            entry = {
+                "session_id": sid,
+                "cwd": p["cwd"],
+                "project": _project_from_cwd(p["cwd"]),
+                "started_at": _now_iso(),
+            }
+        entry["state"] = "closed"
+        entry["updated_at"] = _now_iso()
+        _recently_closed.insert(0, entry)
+        del _recently_closed[_RECENTLY_CLOSED_MAX:]
+    return jsonify({"ok": True})
+
+
+def _scan_transcript(transcript_path):
+    """Yield parsed JSONL records from a transcript file, skipping bad lines."""
+    if not transcript_path:
+        return
+    try:
+        with open(transcript_path, "r") as f:
+            for line in f:
+                try:
+                    yield json.loads(line)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+    except (FileNotFoundError, IOError, OSError):
+        return
+
+
+_STALE_SECONDS = 5 * 60  # Transcripts idle this long are treated as closed.
+
+
+def _iso_from_epoch(epoch):
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
+
+
+def _infer_live_entry(path):
+    """Inspect a JSONL transcript; return (entry_dict, is_stale) or (None, None) if unusable."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None, None
+    mtime = st.st_mtime
+    sid = path.stem
+
+    cwd = ""
+    last_role = ""  # "assistant" | "human" | "command"
+    for rec in _scan_transcript(str(path)):
+        if not cwd:
+            rc = rec.get("cwd")
+            if isinstance(rc, str) and rc:
+                cwd = rc
+        if rec.get("type") == "assistant":
+            last_role = "assistant"
+        elif is_human_message(rec):
+            last_role = "human"
+        elif is_command_message(rec):
+            last_role = "command"
+
+    if not cwd:
+        cwd = "/" + decode_folder_name(path.parent.name)
+
+    is_stale = (time.time() - mtime) > _STALE_SECONDS
+    if is_stale:
+        state = "closed"
+    elif last_role == "assistant":
+        state = "waiting"
+    elif last_role in ("human", "command"):
+        state = "working"
+    else:
+        state = "waiting"
+
+    entry = {
+        "session_id": sid,
+        "state": state,
+        "cwd": cwd,
+        "project": _project_from_cwd(cwd),
+        "transcript_path": str(path),
+        "started_at": _iso_from_epoch(st.st_ctime),
+        "updated_at": _iso_from_epoch(mtime),
+    }
+    return entry, is_stale
+
+
+def _scan_live_from_disk(hours=24):
+    """Walk PROJECTS_DIR for JSONL transcripts modified within `hours` and populate
+    _live_sessions / _recently_closed for any session_ids we don't already track.
+    Hook-populated entries are never overwritten."""
+    if not PROJECTS_DIR.exists():
+        return {"scanned": 0, "added_active": 0, "added_closed": 0}
+    cutoff = time.time() - hours * 3600
+
+    candidates = []  # list of Path
+    for folder in PROJECTS_DIR.iterdir():
+        if not folder.is_dir():
+            continue
+        for jsonl in folder.glob("*.jsonl"):
+            try:
+                if jsonl.stat().st_mtime < cutoff:
+                    continue
+            except OSError:
+                continue
+            candidates.append(jsonl)
+
+    added_active = 0
+    added_closed = 0
+    for path in candidates:
+        sid = path.stem
+        with _live_lock:
+            if sid in _live_sessions:
+                continue
+            if any(s.get("session_id") == sid for s in _recently_closed):
+                continue
+        entry, is_stale = _infer_live_entry(path)
+        if entry is None:
+            continue
+        with _live_lock:
+            if sid in _live_sessions or any(s.get("session_id") == sid for s in _recently_closed):
+                continue
+            if is_stale:
+                _recently_closed.insert(0, entry)
+                del _recently_closed[_RECENTLY_CLOSED_MAX:]
+                added_closed += 1
+            else:
+                _live_sessions[sid] = entry
+                added_active += 1
+    return {"scanned": len(candidates), "added_active": added_active, "added_closed": added_closed}
+
+
+def _first_prompt_from_transcript(transcript_path, limit=200):
+    for entry in _scan_transcript(transcript_path):
+        if is_human_message(entry):
+            text = extract_content(entry)
+            if text:
+                return text[:limit]
+        elif is_command_message(entry):
+            cmd = format_command_content(extract_content(entry))
+            if cmd and cmd.strip().split()[0] != "/clear":
+                return cmd[:limit]
+    return ""
+
+
+def _last_exchange_from_transcript(transcript_path, limit=200):
+    """Return (last_human_text, last_assistant_text), each <= limit chars."""
+    last_human = ""
+    last_assistant = ""
+    for entry in _scan_transcript(transcript_path):
+        if entry.get("type") == "assistant":
+            text = extract_content(entry)
+            if text:
+                last_assistant = text
+        elif is_human_message(entry):
+            text = extract_content(entry)
+            if text:
+                last_human = text
+        elif is_command_message(entry):
+            cmd = format_command_content(extract_content(entry))
+            if cmd:
+                last_human = cmd
+    return last_human[:limit], last_assistant[:limit]
+
+
+def _enrich_session(session, live_names=None):
+    """Add name, message_count, first_prompt, last_human, last_assistant fields.
+    Prefers the live terminal-window name from ~/.claude/sessions/*.json over DB name/slug."""
+    enriched = dict(session)
+    sid = enriched.get("session_id", "")
+    transcript_path = enriched.get("transcript_path", "")
+    if not transcript_path and sid:
+        cwd = enriched.get("cwd", "")
+        if cwd:
+            candidate = PROJECTS_DIR / cwd.replace("/", "-") / f"{sid}.jsonl"
+            if candidate.exists():
+                transcript_path = str(candidate)
+
+    # DB lookup for name/slug/message_count.
+    db_name = ""
+    db_slug = ""
+    message_count = 0
+    if sid:
+        try:
+            conn = get_db()
+            row = conn.execute(
+                "SELECT name, slug, message_count FROM sessions WHERE session_id = ?",
+                [sid],
+            ).fetchone()
+            conn.close()
+            if row:
+                db_name = row["name"] or ""
+                db_slug = row["slug"] or ""
+                message_count = row["message_count"] or 0
+        except sqlite3.Error:
+            pass
+    live_name = (live_names or {}).get(sid, "") if sid else ""
+    enriched["name"] = live_name or db_name or db_slug
+    enriched["message_count"] = message_count
+
+    # Transcript scan for prompts.
+    enriched["first_prompt"] = _first_prompt_from_transcript(transcript_path)
+    last_human, last_assistant = _last_exchange_from_transcript(transcript_path)
+    enriched["last_human"] = last_human
+    enriched["last_assistant"] = last_assistant
+    return enriched
+
+
+@app.route("/api/dashboard")
+def dashboard_api():
+    with _live_lock:
+        active = sorted(_live_sessions.values(), key=lambda s: s["updated_at"], reverse=True)
+        closed = list(_recently_closed)
+    live_names = load_session_names()
+    return jsonify({
+        "active": [_enrich_session(s, live_names) for s in active],
+        "recently_closed": [_enrich_session(s, live_names) for s in closed],
+        "generated_at": _now_iso(),
+    })
+
+
+@app.route("/api/dashboard/session/<session_id>/transcript")
+def dashboard_session_transcript(session_id):
+    """Full human+assistant transcript for inline expand on Dashboard.
+    Prefers indexed DB rows; falls back to scanning the JSONL for live sessions."""
+    # Try DB first.
+    try:
+        conn = get_db()
+        rows = conn.execute("""
+            SELECT timestamp, content, assistant_response
+            FROM messages WHERE session_id = ? ORDER BY timestamp ASC
+        """, [session_id]).fetchall()
+        conn.close()
+    except sqlite3.Error:
+        rows = []
+
+    messages = []
+    for r in rows:
+        if r["content"]:
+            messages.append({"role": "human", "text": r["content"], "ts": r["timestamp"]})
+        if r["assistant_response"]:
+            messages.append({"role": "assistant", "text": r["assistant_response"], "ts": r["timestamp"]})
+
+    if messages:
+        return jsonify({"messages": messages, "source": "db"})
+
+    # Fallback: scan JSONL from live session state.
+    with _live_lock:
+        session = _live_sessions.get(session_id) or next(
+            (s for s in _recently_closed if s.get("session_id") == session_id), None
+        )
+    transcript_path = session.get("transcript_path", "") if session else ""
+    pending_human = None
+    for entry in _scan_transcript(transcript_path):
+        ts = entry.get("timestamp", "")
+        if entry.get("type") == "assistant":
+            text = extract_content(entry)
+            if text:
+                messages.append({"role": "assistant", "text": text, "ts": ts})
+        elif is_human_message(entry):
+            text = extract_content(entry)
+            if text:
+                messages.append({"role": "human", "text": text, "ts": ts})
+        elif is_command_message(entry):
+            cmd = format_command_content(extract_content(entry))
+            if cmd:
+                messages.append({"role": "human", "text": cmd, "ts": ts})
+    return jsonify({"messages": messages, "source": "jsonl"})
+
+
+@app.route("/api/dashboard/scan", methods=["POST"])
+def dashboard_scan():
+    """Walk ~/.claude/projects and populate _live_sessions from any recent transcripts
+    we don't already know about. Useful after a server restart, which drops in-memory state."""
+    hours = request.args.get("hours", 24, type=int)
+    return jsonify(_scan_live_from_disk(hours=hours))
+
+
+@app.route("/api/dashboard/session/<session_id>", methods=["DELETE"])
+def dashboard_delete_session(session_id):
+    """Manually remove a session from the live dashboard (active or recently closed)."""
+    with _live_lock:
+        _live_sessions.pop(session_id, None)
+        _recently_closed[:] = [s for s in _recently_closed if s.get("session_id") != session_id]
+    return jsonify({"ok": True})
 
 
 def get_db():
@@ -480,5 +855,8 @@ if __name__ == "__main__":
     print("Running initial index...")
     stats = run_index()
     print(f"Indexed {stats['total_messages']} messages in {stats['elapsed_seconds']}s")
+    scan = _scan_live_from_disk()
+    print(f"Scanned {scan['scanned']} recent transcripts "
+          f"({scan['added_active']} active, {scan['added_closed']} closed)")
     print("Starting server at http://localhost:5111")
     app.run(host="127.0.0.1", port=5111, debug=False)

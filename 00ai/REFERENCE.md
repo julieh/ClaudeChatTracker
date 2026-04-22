@@ -56,15 +56,25 @@ requirements.txt       # Python dependencies
 | `/api/deleted?project=&starred=&min_stars=&tag=&sort=` | GET | List hidden/deleted sessions (same filters as /api/sessions) |
 | `/api/deleted/projects` | GET | Projects that have at least one hidden session |
 | `/api/reindex` | POST | Re-index transcripts |
+| `/api/dashboard` | GET | Live session status. Returns `{active, recently_closed, generated_at}`. Reads in-memory state populated by Claude Code hooks — not from the DB. |
+| `/api/hook/session-start` | POST | Hook endpoint: Claude Code `SessionStart`. Inserts/updates session, state=`waiting`. Accepts JSON body with `session_id` and `cwd`. |
+| `/api/hook/user-prompt-submit` | POST | Hook endpoint: Claude Code `UserPromptSubmit`. Sets state=`working`. |
+| `/api/hook/stop` | POST | Hook endpoint: Claude Code `Stop`. Sets state=`waiting`. |
+| `/api/hook/session-end` | POST | Hook endpoint: Claude Code `SessionEnd`. Moves session to `recently_closed` (bounded to 5 most recent). |
 
 ## Frontend Architecture
 
 ### Views (tabs)
-1. **Search** - FTS search with project/date/star/tag filters, paginated results
-2. **Browse** - Left sidebar with project list (multi-select), right panel shows sessions
-3. **Timeline** - Stacked bar chart of messages over time by project
-4. **Stats** - Summary cards and tables
-5. **Deleted** - Browse/restore soft-deleted (hidden) sessions, same sidebar+filters layout as Browse
+1. **Dashboard** (default) - Live view of currently-running Claude Code sessions, grouped by state (working / waiting / recently closed). Populated by Claude Code hooks POSTing to `/api/hook/*`. Auto-refreshes every 5s while visible; polling stops when switching views. In-memory only — resets when Flask restarts.
+2. **Search** - FTS search with project/date/star/tag filters, paginated results
+3. **Browse** - Left sidebar with project list (multi-select), right panel shows sessions
+4. **Timeline** - Stacked bar chart of messages over time by project
+5. **Stats** - Summary cards and tables
+6. **Deleted** - Browse/restore soft-deleted (hidden) sessions, same sidebar+filters layout as Browse
+
+### Key State Variables (Dashboard view)
+- `dashTimer` - setInterval handle for auto-refresh (5s). Cleared when leaving the view.
+- Server-side: `_live_sessions` (dict, session_id → {state, cwd, project, started_at, updated_at}) and `_recently_closed` (list, capped at 5). Guarded by `_live_lock`. In-memory; not persisted.
 
 ### Key State Variables (Browse view)
 - `browseSelectedProjects` (Set) - Currently selected projects

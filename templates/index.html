@@ -103,7 +103,11 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
 .message-card .content { font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .message-card .copy-btn { position: absolute; top: 8px; right: 8px; }
 .message-card .assistant-response { margin-top: 10px; padding: 10px 12px; background: var(--surface2, #1a1a2e); border-radius: 6px; border-left: 3px solid var(--accent2, #4ecca3); }
-.message-card .assistant-label { font-size: 10px; color: var(--accent2, #4ecca3); margin-bottom: 4px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+.message-card .assistant-label { font-size: 10px; color: var(--accent2, #4ecca3); margin-bottom: 4px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+.message-card .assistant-label .caret { display: inline-block; transition: transform 0.15s; }
+.message-card .assistant-response.collapsed .assistant-label { margin-bottom: 0; }
+.message-card .assistant-response.collapsed .assistant-label .caret { transform: rotate(-90deg); }
+.message-card .assistant-response.collapsed .assistant-text { display: none; }
 .message-card .assistant-text { font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; opacity: 0.85; }
 
 /* Timeline */
@@ -131,6 +135,51 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
 
 .empty { color: var(--text2); text-align: center; padding: 40px; font-size: 14px; }
 .loading { color: var(--text2); text-align: center; padding: 20px; }
+
+/* Dashboard */
+.dash-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.dash-header h2 { margin: 0; font-size: 18px; }
+.dash-updated { font-size: 11px; color: var(--text2); }
+.dash-section { margin-bottom: 24px; }
+.dash-section h3 { font-size: 13px; text-transform: uppercase; color: var(--text2); margin: 0 0 10px 0; display: flex; align-items: center; gap: 8px; }
+.dash-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dash-dot.working { background: #4ade80; box-shadow: 0 0 8px #4ade80aa; animation: pulse 1.4s ease-in-out infinite; }
+.dash-dot.waiting { background: #fbbf24; }
+.dash-dot.closed { background: #6b7280; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.dash-grid { display: flex; flex-direction: column; gap: 12px; }
+.dash-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; transition: border-color 0.15s; position: relative; display: flex; flex-direction: column; gap: 8px; }
+.dash-card:hover { border-color: var(--green); }
+.dash-card .card-header { display: flex; align-items: center; gap: 8px; justify-content: space-between; padding-right: 4px; }
+.dash-card .card-title { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.dash-card .project { font-size: 13px; font-weight: 600; word-break: break-word; }
+.dash-card .age { font-size: 11px; color: var(--text2); white-space: nowrap; }
+.dash-card .card-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+.dash-card .browse-link { font-size: 13px; color: var(--text2); background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; cursor: pointer; font-family: inherit; font-weight: 500; }
+.dash-card .browse-link:hover { color: var(--green); border-color: var(--green); }
+.dash-card .name { font-size: 12px; color: var(--green); font-weight: 500; word-break: break-word; }
+.dash-card .divider { height: 1px; background: var(--border); margin: 0; }
+.dash-card .exchange { font-size: 12px; line-height: 1.45; word-break: break-word; }
+.dash-card .exchange .role { font-weight: 600; color: var(--text2); font-size: 11px; text-transform: uppercase; margin-right: 6px; }
+.dash-card .exchange .first .role { color: #8b9bb4; }
+.dash-card .exchange .you .role { color: #fbbf24; }
+.dash-card .exchange .claude .role { color: #4ade80; }
+.dash-card .exchange .text { color: var(--text); }
+.dash-card .card-footer { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text2); }
+.dash-card .footer-actions { display: flex; gap: 8px; align-items: center; }
+.dash-card .expand-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text2); cursor: pointer; font-size: 13px; padding: 6px 14px; font-family: inherit; font-weight: 500; }
+.dash-card .expand-btn:hover { color: var(--green); border-color: var(--green); }
+.dash-card .transcript { max-height: 400px; overflow-y: auto; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px; display: none; }
+.dash-card.expanded .transcript { display: block; }
+.dash-card .transcript .msg { font-size: 12px; margin-bottom: 8px; line-height: 1.45; word-break: break-word; }
+.dash-card .transcript .msg .role { font-weight: 600; font-size: 10px; text-transform: uppercase; margin-right: 6px; }
+.dash-card .transcript .msg.human .role { color: #fbbf24; }
+.dash-card .transcript .msg.assistant .role { color: #4ade80; }
+.dash-card.closed { opacity: 0.6; }
+.dash-card .dismiss { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 4px; opacity: 0.5; transition: opacity 0.15s, background 0.15s; }
+.dash-card:hover .dismiss { opacity: 0.9; }
+.dash-card .dismiss:hover { opacity: 1; background: var(--border); color: var(--accent); }
+.dash-empty { color: var(--text2); font-size: 12px; padding: 8px 0; }
 </style>
 </head>
 <body>
@@ -138,8 +187,9 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
 <nav>
   <span class="logo">Claude Chats</span>
   <div class="tabs">
+    <div class="tab active" data-view="dashboard">Dashboard</div>
     <div class="tab" data-view="search">Search</div>
-    <div class="tab active" data-view="browse">Browse</div>
+    <div class="tab" data-view="browse">Browse</div>
     <div class="tab" data-view="timeline">Timeline</div>
     <div class="tab" data-view="stats">Stats</div>
     <div class="tab" data-view="deleted">Deleted</div>
@@ -151,6 +201,29 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
 </nav>
 
 <div class="main">
+  <!-- Dashboard View -->
+  <div class="view active" id="view-dashboard">
+    <div class="dash-header">
+      <h2>Live Claude Code sessions</h2>
+      <div>
+        <span class="dash-updated" id="dash-updated"></span>
+        <button class="reindex-btn" onclick="scanAndReload()" style="margin-left:8px;">Refresh</button>
+      </div>
+    </div>
+    <div class="dash-section">
+      <h3><span class="dash-dot working"></span> Working <span id="dash-count-working" style="color:var(--text2);font-weight:normal"></span></h3>
+      <div class="dash-grid" id="dash-working"></div>
+    </div>
+    <div class="dash-section">
+      <h3><span class="dash-dot waiting"></span> Waiting for you <span id="dash-count-waiting" style="color:var(--text2);font-weight:normal"></span></h3>
+      <div class="dash-grid" id="dash-waiting"></div>
+    </div>
+    <div class="dash-section">
+      <h3><span class="dash-dot closed"></span> Recently closed <span style="color:var(--text2);font-weight:normal;font-size:11px;">(last 10)</span></h3>
+      <div class="dash-grid" id="dash-closed"></div>
+    </div>
+  </div>
+
   <!-- Search View -->
   <div class="view" id="view-search">
     <div class="search-bar">
@@ -176,7 +249,7 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
   </div>
 
   <!-- Browse View -->
-  <div class="view active" id="view-browse">
+  <div class="view" id="view-browse">
     <div class="browse-layout">
       <div class="browse-sidebar" id="browse-projects"></div>
       <div class="browse-content" id="browse-content">
@@ -223,6 +296,233 @@ const $$ = s => document.querySelectorAll(s);
 
 let allTags = []; // cached tag list
 
+// --- Dashboard ---
+let dashTimer = null;
+
+function startDashboard() {
+  loadDashboard();
+  if (dashTimer) clearInterval(dashTimer);
+  dashTimer = setInterval(loadDashboard, 5000);
+}
+function stopDashboard() {
+  if (dashTimer) { clearInterval(dashTimer); dashTimer = null; }
+}
+function ago(iso) {
+  if (!iso) return '';
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+
+function fillDashCard(card, s, closed) {
+  card.classList.toggle('closed', !!closed);
+  const project = s.project || s.cwd || '(unknown)';
+  card.querySelector('.project').textContent = project;
+  card.querySelector('.age').textContent = ago(s.updated_at);
+
+  const nameEl = card.querySelector('.name');
+  if (s.name) { nameEl.textContent = s.name; nameEl.style.display = ''; }
+  else { nameEl.textContent = ''; nameEl.style.display = 'none'; }
+
+  const firstEl = card.querySelector('.exchange.first .text');
+  const firstBlock = card.querySelector('.exchange.first');
+  if (s.first_prompt) { firstEl.textContent = s.first_prompt; firstBlock.style.display = ''; }
+  else { firstBlock.style.display = 'none'; }
+
+  const youEl = card.querySelector('.exchange.you .text');
+  const claudeEl = card.querySelector('.exchange.claude .text');
+  const youBlock = card.querySelector('.exchange.you');
+  const claudeBlock = card.querySelector('.exchange.claude');
+  // Hide last-exchange block entirely if last_human matches first_prompt and there's no assistant reply yet.
+  const duplicateFirst = s.last_human && s.last_human === s.first_prompt && !s.last_assistant;
+  if (duplicateFirst || (!s.last_human && !s.last_assistant)) {
+    youBlock.style.display = 'none';
+    claudeBlock.style.display = 'none';
+    card.querySelector('.divider.above-exchange').style.display = 'none';
+  } else {
+    card.querySelector('.divider.above-exchange').style.display = s.first_prompt ? '' : 'none';
+    if (s.last_human) { youEl.textContent = s.last_human; youBlock.style.display = ''; }
+    else { youBlock.style.display = 'none'; }
+    if (s.last_assistant) { claudeEl.textContent = s.last_assistant; claudeBlock.style.display = ''; }
+    else { claudeBlock.style.display = 'none'; }
+  }
+
+  const countEl = card.querySelector('.msg-count');
+  countEl.textContent = s.message_count ? `${s.message_count} messages` : '';
+}
+
+function buildDashCard(s, closed) {
+  const card = document.createElement('div');
+  card.className = 'dash-card';
+  card.dataset.sessionId = s.session_id || '';
+  card.innerHTML = `
+    <div class="card-header">
+      <div class="card-title">
+        <span class="project"></span>
+        <span class="age"></span>
+        <button class="browse-link" data-action="browse" title="Open in Browse view">Browse ↗</button>
+        <button class="expand-btn" data-action="expand">▸ Expand transcript</button>
+      </div>
+      <div class="card-actions">
+        <button class="dismiss" data-action="dismiss" title="Remove from dashboard">✕</button>
+      </div>
+    </div>
+    <div class="name"></div>
+    <div class="divider"></div>
+    <div class="exchange first"><span class="text"></span></div>
+    <div class="divider above-exchange"></div>
+    <div class="exchange you"><span class="role">Last</span><span class="text"></span></div>
+    <div class="exchange claude"><span class="role">Claude</span><span class="text"></span></div>
+    <div class="card-footer">
+      <span class="msg-count"></span>
+    </div>
+    <div class="transcript"></div>
+  `;
+  fillDashCard(card, s, closed);
+  return card;
+}
+
+async function toggleTranscript(card) {
+  const sid = card.dataset.sessionId;
+  if (!sid) return;
+  const transcriptEl = card.querySelector('.transcript');
+  const btn = card.querySelector('.expand-btn');
+  const isExpanded = card.classList.contains('expanded');
+  if (isExpanded) {
+    card.classList.remove('expanded');
+    btn.textContent = '▸ Expand transcript';
+    return;
+  }
+  if (!transcriptEl.dataset.loaded) {
+    transcriptEl.innerHTML = '<div class="loading" style="padding:8px">Loading…</div>';
+    try {
+      const res = await fetch(`/api/dashboard/session/${encodeURIComponent(sid)}/transcript`);
+      const data = await res.json();
+      if (!data.messages || !data.messages.length) {
+        transcriptEl.innerHTML = '<div class="dash-empty">No messages yet.</div>';
+      } else {
+        transcriptEl.innerHTML = data.messages.map(m => `
+          <div class="msg ${m.role}">
+            <span class="role">${m.role === 'assistant' ? 'Claude' : 'You'}</span>
+            <span class="text"></span>
+          </div>
+        `).join('');
+        const nodes = transcriptEl.querySelectorAll('.msg .text');
+        data.messages.forEach((m, i) => { nodes[i].textContent = m.text; });
+      }
+      transcriptEl.dataset.loaded = '1';
+      const countEl = card.querySelector('.msg-count');
+      transcriptEl.dataset.cachedCount = countEl ? (countEl.textContent.match(/\d+/) || ['0'])[0] : '0';
+    } catch (e) {
+      transcriptEl.innerHTML = '<div class="dash-empty">Failed to load transcript.</div>';
+    }
+  }
+  card.classList.add('expanded');
+  btn.textContent = '▾ Collapse';
+}
+
+function reconcileSection(gridEl, sessions, closed, emptyMessage) {
+  if (!gridEl) return;
+
+  if (!sessions.length) {
+    gridEl.innerHTML = `<div class="dash-empty">${esc(emptyMessage)}</div>`;
+    return;
+  }
+
+  // Map existing card elements by session_id; remove the empty-state placeholder if present.
+  const existing = new Map();
+  for (const child of Array.from(gridEl.children)) {
+    const sid = child.dataset && child.dataset.sessionId;
+    if (sid) existing.set(sid, child);
+    else child.remove();  // empty-state div
+  }
+
+  // Build the desired order, reusing existing elements in place.
+  let prev = null;
+  for (const s of sessions) {
+    const sid = s.session_id || '';
+    let card = existing.get(sid);
+    if (card) {
+      fillDashCard(card, s, closed);
+      // Invalidate cached transcript if message count changed so next expand refetches.
+      const tEl = card.querySelector('.transcript');
+      if (tEl && tEl.dataset.cachedCount && tEl.dataset.cachedCount !== String(s.message_count || 0)) {
+        delete tEl.dataset.loaded;
+      }
+      existing.delete(sid);
+    } else {
+      card = buildDashCard(s, closed);
+    }
+    // Insert in correct position without disrupting elements already in the right slot.
+    const target = prev ? prev.nextSibling : gridEl.firstChild;
+    if (card !== target) gridEl.insertBefore(card, target);
+    prev = card;
+  }
+
+  // Remove any leftover cards that weren't in the new list.
+  for (const stale of existing.values()) stale.remove();
+}
+
+async function scanAndReload() {
+  const el = $('#dash-updated');
+  const prev = el.textContent;
+  el.textContent = 'Scanning...';
+  try {
+    await fetch('/api/dashboard/scan', { method: 'POST' });
+  } catch (e) {
+    el.textContent = prev;
+  }
+  loadDashboard();
+}
+
+async function loadDashboard() {
+  try {
+    const res = await fetch('/api/dashboard');
+    const data = await res.json();
+    const working = data.active.filter(s => s.state === 'working');
+    const waiting = data.active.filter(s => s.state === 'waiting');
+    const closed = data.recently_closed || [];
+    reconcileSection($('#dash-working'), working, false, 'Nothing actively working.');
+    reconcileSection($('#dash-waiting'), waiting, false,
+      'No sessions waiting. If you expected some here, make sure hooks are installed (see SHARING.md).');
+    reconcileSection($('#dash-closed'), closed, true, 'No sessions have ended recently.');
+    $('#dash-count-working').textContent = working.length ? `(${working.length})` : '';
+    $('#dash-count-waiting').textContent = waiting.length ? `(${waiting.length})` : '';
+    $('#dash-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    $('#dash-updated').textContent = 'Failed to load';
+  }
+}
+
+async function dismissDashSession(sessionId) {
+  try {
+    await fetch(`/api/dashboard/session/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+  } catch (e) { /* ignore; refresh will reflect server truth */ }
+  loadDashboard();
+}
+
+// Event delegation: one listener per grid handles dismiss, browse, and expand clicks.
+document.addEventListener('DOMContentLoaded', () => {
+  for (const gridId of ['dash-working', 'dash-waiting', 'dash-closed']) {
+    const grid = document.getElementById(gridId);
+    if (!grid) continue;
+    grid.addEventListener('click', (e) => {
+      const actionBtn = e.target.closest('[data-action]');
+      if (!actionBtn) return;
+      const card = actionBtn.closest('.dash-card');
+      if (!card) return;
+      const sid = card.dataset.sessionId;
+      const action = actionBtn.dataset.action;
+      if (action === 'dismiss' && sid) { dismissDashSession(sid); }
+      else if (action === 'browse' && sid) { showSession(sid); }
+      else if (action === 'expand') { toggleTranscript(card); }
+    });
+  }
+  startDashboard();
+});
+
 // Tabs
 $$('nav .tab').forEach(tab => {
   tab.addEventListener('click', () => {
@@ -230,6 +530,8 @@ $$('nav .tab').forEach(tab => {
     $$('.view').forEach(v => v.classList.remove('active'));
     tab.classList.add('active');
     $(`#view-${tab.dataset.view}`).classList.add('active');
+    if (tab.dataset.view === 'dashboard') startDashboard();
+    else stopDashboard();
     if (tab.dataset.view === 'browse') loadProjects();
     if (tab.dataset.view === 'timeline') loadTimeline();
     if (tab.dataset.view === 'stats') loadStats();
@@ -241,7 +543,7 @@ $$('nav .tab').forEach(tab => {
 document.addEventListener('keydown', e => {
   if (e.key === '/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) {
     e.preventDefault();
-    $$('nav .tab')[0].click();
+    $('nav .tab[data-view="search"]').click();
     $('#search-input').focus();
   }
 });
@@ -394,7 +696,7 @@ function pickTag(el, tag) {
 
 function filterByTag(tag) {
   // Switch to search, set tag filter
-  $$('nav .tab')[0].click();
+  $('nav .tab[data-view="search"]').click();
   $('#search-tag').value = tag;
   doSearch(1);
 }
@@ -639,8 +941,9 @@ async function showSession(sessionId) {
   browseLastViewedSession = sessionId;
   $$('nav .tab').forEach(t => t.classList.remove('active'));
   $$('.view').forEach(v => v.classList.remove('active'));
-  $$('nav .tab')[1].classList.add('active');
+  $('nav .tab[data-view="browse"]').classList.add('active');
   $('#view-browse').classList.add('active');
+  stopDashboard();
 
   const [msgRes, metaRes] = await Promise.all([
     fetch(`/api/session/${sessionId}`),
@@ -665,14 +968,14 @@ async function showSession(sessionId) {
       ${renderTagChips(tags, sessionId)}
     </div>
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;display:flex;align-items:center;gap:8px">
-      <code style="color:var(--green)">claude --resume ${sessionId}</code>
-      <button class="btn-sm copy-btn" onclick="navigator.clipboard.writeText('claude --resume ${sessionId}');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+      <code style="color:var(--green)">/resume ${sessionId}</code>
+      <button class="btn-sm copy-btn" onclick="navigator.clipboard.writeText('/resume ${sessionId}');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
     </div>
     ${messages.map(m => `
       <div class="message-card">
         <div class="ts">${formatTs(m.timestamp)}${m.git_branch ? ` \u00b7 ${esc(m.git_branch)}` : ''}</div>
         <div class="content">${esc(m.content)}</div>
-        ${m.assistant_response ? `<div class="assistant-response"><div class="assistant-label">Claude</div><div class="assistant-text">${esc(m.assistant_response)}</div></div>` : ''}
+        ${m.assistant_response ? `<div class="assistant-response"><div class="assistant-label" onclick="this.parentElement.classList.toggle('collapsed')"><span class="caret">▼</span>Claude</div><div class="assistant-text">${esc(m.assistant_response)}</div></div>` : ''}
         <button class="btn-sm copy-btn" data-copy="${esc(m.content).replace(/"/g,'&quot;')}" onclick="copyText(this)">Copy</button>
       </div>
     `).join('')}
@@ -942,7 +1245,7 @@ async function showDeletedSession(sessionId) {
       <div class="message-card">
         <div class="ts">${formatTs(m.timestamp)}${m.git_branch ? ` \u00b7 ${esc(m.git_branch)}` : ''}</div>
         <div class="content">${esc(m.content)}</div>
-        ${m.assistant_response ? `<div class="assistant-response"><div class="assistant-label">Claude</div><div class="assistant-text">${esc(m.assistant_response)}</div></div>` : ''}
+        ${m.assistant_response ? `<div class="assistant-response"><div class="assistant-label" onclick="this.parentElement.classList.toggle('collapsed')"><span class="caret">▼</span>Claude</div><div class="assistant-text">${esc(m.assistant_response)}</div></div>` : ''}
         <button class="btn-sm copy-btn" data-copy="${esc(m.content).replace(/"/g,'&quot;')}" onclick="copyText(this)">Copy</button>
       </div>
     `).join('')}
