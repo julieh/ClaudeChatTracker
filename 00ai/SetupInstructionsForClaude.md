@@ -118,7 +118,153 @@ Briefly explain:
   > "Start Claude Chats — run `python3 app.py` from this folder in the
   > background and tell me when it's ready."
 
-## Step 6 — Offer a one-click shortcut
+## Step 6 — Optional: turn on the live Dashboard
+
+Ask the user, exactly:
+
+> "There's one optional thing left. The app has a 'Dashboard' view that shows
+> which of your Claude Code sessions are running right now — working vs.
+> waiting for input. It's populated by Claude Code hooks that fire a tiny
+> localhost ping on session events. Two honest notes before you decide:
+>
+> 1. **The only thing this enables is the Dashboard view.** Search, Browse,
+>    Timeline, and Stats all work fine without it.
+> 2. **Julie (who built this) doesn't actually find the Dashboard that
+>    useful** — so if you're on the fence, it's totally fine to skip.
+> 3. **About the file I'd be editing.** `~/.claude/settings.json` controls
+>    how Claude Code itself behaves. A bad edit (corrupted JSON, accidentally
+>    overwriting other settings) could keep Claude Code from starting
+>    cleanly. To be safe, I will: (a) back up the file before touching it,
+>    (b) show you exactly what's being added before I write, (c) re-parse
+>    the file afterward to confirm it's still valid JSON, and (d) restore
+>    the backup automatically if anything looks wrong.
+>
+> Want me to set it up anyway, or skip it?"
+
+**If they skip:** great, move on to Step 7.
+
+**If they want it:** do the following.
+
+### What you'll do
+
+Merge four hook entries into the user's `~/.claude/settings.json`. The hooks
+fire-and-forget a `curl` POST to `http://localhost:5111/api/hook/...` with a
+1-second timeout, run detached with `&`, and silently fail if the app isn't
+running. They will not slow down or stall the user's Claude Code sessions.
+
+### Procedure (do every step — the safety steps are not optional)
+
+1. **Read the existing settings file** at `~/.claude/settings.json`. If it
+   doesn't exist, skip step 2 and create a new file in step 5.
+2. **Back it up first.** Copy the file to
+   `~/.claude/settings.json.bak.<YYYY-MM-DD-HHMM>` using the actual current
+   timestamp. Never overwrite an existing backup — if a backup with that
+   exact name already exists, append `-2`, `-3`, etc.
+3. **Compute the merged content — don't overwrite.** If the file already
+   has a `hooks` key with entries for `SessionStart`, `UserPromptSubmit`,
+   `Stop`, or `SessionEnd`, *append* to those arrays rather than replacing
+   them. The user may have other hooks configured (statusline integrations,
+   formatters, etc.) that you must not clobber. Do not modify any non-hook
+   keys at all.
+4. **Preview the change to the user before writing.** Briefly tell them:
+   "I'm about to add 4 hook entries to your settings file; nothing else in
+   the file will change. I've already backed up the original to
+   `~/.claude/settings.json.bak.<timestamp>`." Don't make them re-approve —
+   they already consented; this is just transparency.
+5. **Write the merged result** with 2-space indent so the file stays readable.
+6. **Validate immediately after writing.** Re-read the file and parse it as
+   JSON. If parsing fails for any reason, restore the backup immediately
+   (`cp ~/.claude/settings.json.bak.<timestamp> ~/.claude/settings.json`)
+   and tell the user what happened. Do not leave the user with a broken
+   settings file under any circumstances.
+7. **Tell the user** they need to start a *new* Claude Code session for the
+   hooks to take effect, and remind them where the backup lives in case
+   they want to undo this later.
+
+### The hook entries to merge
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s --max-time 1 -X POST http://localhost:5111/api/hook/session-start -H 'Content-Type: application/json' -d \"$CLAUDE_HOOK_JSON\" >/dev/null 2>&1 &"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s --max-time 1 -X POST http://localhost:5111/api/hook/user-prompt-submit -H 'Content-Type: application/json' -d \"$CLAUDE_HOOK_JSON\" >/dev/null 2>&1 &"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s --max-time 1 -X POST http://localhost:5111/api/hook/stop -H 'Content-Type: application/json' -d \"$CLAUDE_HOOK_JSON\" >/dev/null 2>&1 &"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s --max-time 1 -X POST http://localhost:5111/api/hook/session-end -H 'Content-Type: application/json' -d \"$CLAUDE_HOOK_JSON\" >/dev/null 2>&1 &"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Verify it worked
+
+After the user starts a new Claude Code session somewhere, have them refresh
+http://localhost:5111 and look at the Dashboard. They should see at least
+that new session listed under "working" or "waiting." If not, double-check
+that `~/.claude/settings.json` parses as valid JSON (a misplaced comma will
+silently disable all hooks).
+
+### If something goes wrong after the user restarts Claude Code
+
+If Claude Code misbehaves on next launch (errors on startup, settings
+appear reset, hooks not firing as expected), there are two recovery paths
+in order of preference:
+
+1. **Restore the backup.** Tell the user: "Your previous settings are saved
+   at `~/.claude/settings.json.bak.<timestamp>`. Want me to restore it?"
+   If yes, copy the backup back over `~/.claude/settings.json`, then have
+   them restart Claude Code again.
+2. **Reset to defaults.** Deleting `~/.claude/settings.json` entirely is
+   safe — Claude Code recreates a default file on next launch. The user
+   loses any custom settings that were in there (theme, model preferences,
+   custom permissions, other hooks), so always prefer option 1 first.
+
+If the user restored the backup but still has problems, the issue is
+unrelated to this setup — direct them to whatever support channel they
+normally use for Claude Code.
+
+### How to turn it off later
+
+Tell the user: "If you change your mind, just open `~/.claude/settings.json`
+and delete the four entries we added (`SessionStart`, `UserPromptSubmit`,
+`Stop`, `SessionEnd`) — or paste this prompt into Claude Desktop:
+*'Remove the Claude Chats dashboard hooks from my Claude settings.'*"
+
+## Step 7 — Offer a one-click shortcut
 
 Ask the user:
 
@@ -138,7 +284,7 @@ Use judgment based on the conversation so far:
   about state. Give the user this prompt to paste into a new Code-tab session
   in the same folder:
   > "Create a one-click startup shortcut for Claude Chats. I'm on [Mac/Windows].
-  > Follow the 'Step 6' instructions in `00ai/SetupInstructionsForClaude.md`."
+  > Follow the 'Step 7' instructions in `00ai/SetupInstructionsForClaude.md`."
 
 **To create the shortcut:**
 
@@ -172,7 +318,7 @@ specific to the user's machine.
 ### If they say no
 
 Tell them they can always come back and ask for the shortcut later by pasting:
-> "Create the one-click startup shortcut for Claude Chats — Step 6 in
+> "Create the one-click startup shortcut for Claude Chats — Step 7 in
 > `00ai/SetupInstructionsForClaude.md`."
 
 ---
