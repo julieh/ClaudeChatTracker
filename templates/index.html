@@ -92,6 +92,9 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
 .session-item:hover { border-color: var(--accent2); }
 .session-item .ts { color: var(--text2); font-size: 11px; }
 .session-item .first-msg { color: #fbfbfd; font-size: 12px; margin-top: 6px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; max-height: 3.6em; overflow: hidden; opacity: 0.7; }
+.session-item .last-msg { display: none; font-size: 12px; margin-top: 6px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 3.6em; overflow: hidden; color: var(--text); }
+.session-item:hover .last-msg { display: block; }
+.session-item .last-msg .role { font-weight: 600; color: #fbbf24; font-size: 11px; text-transform: uppercase; margin-right: 6px; }
 .session-item .session-actions { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
 .session-item.file-missing { opacity: 0.65; border-style: dashed; }
 
@@ -953,6 +956,7 @@ async function loadBrowseSessions() {
       </div>
       <div class="ts">${formatTs(s.first_ts)} \u2192 ${formatTs(s.last_ts)}</div>
       ${s.first_message ? `<div class="first-msg">${esc(s.first_message)}</div>` : ''}
+      ${s.last_message && s.last_message !== s.first_message ? `<div class="last-msg"><span class="role">Last</span>${esc(s.last_message)}</div>` : ''}
       <div class="session-actions">
         ${renderTagChips(s.tags || [], s.session_id)}
         <button class="btn-sm" onclick="event.stopPropagation();toggleArchive('${s.session_id}')">Archive</button>

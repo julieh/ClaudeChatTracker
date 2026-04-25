@@ -587,6 +587,15 @@ def sessions():
             if first_content.strip() == "/clear" and len(first_msgs) > 1:
                 first_content = first_msgs[1]["content"]
         d["first_message"] = first_content[:300]
+        last_msgs = conn.execute("""
+            SELECT content FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT 2
+        """, [d["session_id"]]).fetchall()
+        last_content = ""
+        if last_msgs:
+            last_content = last_msgs[0]["content"]
+            if last_content.strip() == "/exit" and len(last_msgs) > 1:
+                last_content = last_msgs[1]["content"]
+        d["last_message"] = last_content[:300]
         result.append(d)
 
     _attach_session_meta(conn, result)
