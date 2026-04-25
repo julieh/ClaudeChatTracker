@@ -1302,6 +1302,7 @@ async function doBackup() {
     const data = await res.json();
     btn.textContent = 'Backed up!';
     setTimeout(() => { btn.textContent = 'Backup'; btn.disabled = false; }, 2000);
+    alert('Backup saved to:\n' + data.path);
   } catch(e) {
     btn.textContent = 'Error';
     setTimeout(() => { btn.textContent = 'Backup'; btn.disabled = false; }, 2000);
