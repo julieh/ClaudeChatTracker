@@ -59,7 +59,7 @@
 
 ### Easy path (recommended — works for non-technical users)
 
-1. Clone this repo
+1. Clone this repo using your favorite Git client (mine is https://fork.dev/)
 2. Open the **Code tab** in Claude Desktop → **New Session** → select the cloned folder
 3. Paste this prompt:
    ```
@@ -111,4 +111,4 @@ git pull
 python app.py
 ```
 
-Schema migrations and re-indexing happen automatically. PRs welcome.
+Schema migrations and re-indexing happen automatically.
