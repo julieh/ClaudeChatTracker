@@ -71,7 +71,7 @@ That's it. Claude will check Python, install dependencies, start the app, and wa
 ### Manual path (for developers)
 
 ```bash
-git clone <this-repo>
+git clone git@github.com:julieh/ClaudeChatTracker.git
 cd ClaudeChatTracker
 pip install -r requirements.txt
 python app.py
