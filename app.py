@@ -13,6 +13,7 @@ from indexer import (
     is_human_message, is_command_message, format_command_content, extract_content,
     load_session_names, decode_folder_name,
 )
+from timesheet import fetch_rows, write_csv, write_xlsx
 
 app = Flask(__name__)
 
@@ -878,6 +879,23 @@ def backup():
     backup_path = backup_dir / f"{timestamp}_transcripts.db"
     shutil.copy2(str(DB_PATH), str(backup_path))
     return jsonify({"path": str(backup_path)})
+
+
+@app.route("/api/dump-timesheet", methods=["POST"])
+def dump_timesheet():
+    out_dir = Path(__file__).parent / "00ai" / "timedumps"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%d-%H%M")
+    csv_path = out_dir / f"{stamp}_timesheet.csv"
+    xlsx_path = out_dir / f"{stamp}_timesheet.xlsx"
+    rows = fetch_rows(DB_PATH, days=4)
+    write_csv(rows, csv_path)
+    write_xlsx(rows, xlsx_path)
+    return jsonify({
+        "csv_path": str(csv_path),
+        "xlsx_path": str(xlsx_path),
+        "row_count": len(rows),
+    })
 
 
 @app.route("/api/reindex", methods=["POST"])

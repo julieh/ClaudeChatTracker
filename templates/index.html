@@ -211,8 +211,9 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
     <div class="tab" data-view="deleted">Deleted</div>
   </div>
   <div class="right">
-    <button class="reindex-btn" onclick="doBackup()">Backup</button>
-    <button class="reindex-btn" onclick="doReindex()">Reindex</button>
+    <button class="reindex-btn" onclick="doDumpTimesheet(this)">Dump Timesheet</button>
+    <button class="reindex-btn" onclick="doBackup(this)">Backup</button>
+    <button class="reindex-btn" onclick="doReindex(this)">Reindex</button>
   </div>
 </nav>
 
@@ -947,7 +948,7 @@ async function loadBrowseSessions() {
   $('#browse-content').innerHTML = filtersHtml + sessions.map(s => {
     const starId = `bs-star-${bsIdx++}`;
     return `
-    <div class="session-item${s.file_missing ? ' file-missing' : ''}" data-session="${s.session_id}" onclick="showSession('${s.session_id}')" onmouseleave="this.classList.remove('show-last-on')">
+    <div class="session-item${s.file_missing ? ' file-missing' : ''}" data-session="${s.session_id}" onclick="showSession('${s.session_id}')">
       <button class="complete-check${s.complete ? ' checked' : ''}" onclick="event.stopPropagation();toggleComplete('${s.session_id}', this)" title="${s.complete ? 'Complete \u2014 click to reopen' : 'Mark complete'}">${s.complete ? '\u2713' : ''}</button>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-right:28px">
         ${renderStars(s.session_id, s.starred, starId)}
@@ -962,7 +963,7 @@ async function loadBrowseSessions() {
       <div class="session-actions">
         ${renderTagChips(s.tags || [], s.session_id)}
         <button class="btn-sm" onclick="event.stopPropagation();toggleArchive('${s.session_id}')">Archive</button>
-        ${s.last_message && s.last_message !== s.first_message ? `<span class="show-last btn-sm" onclick="event.stopPropagation()" onmouseenter="this.closest('.session-item').classList.add('show-last-on')" title="Hover to preview last message">Show Last</span>` : ''}
+        ${s.last_message && s.last_message !== s.first_message ? `<span class="show-last btn-sm" onclick="event.stopPropagation();const i=this.closest('.session-item');i.classList.remove('show-last-on');this.textContent='Show Last';this.title='Hover to preview last message'" onmouseenter="const i=this.closest('.session-item');if(!i.classList.contains('show-last-on')){i.classList.add('show-last-on');this.textContent='Hide Last';this.title='Click to hide last message'}" title="Hover to preview last message">Show Last</span>` : ''}
         <button class="btn-sm" onclick="event.stopPropagation();hideSession('${s.session_id}')" title="Remove from app (keeps data in DB)">Delete</button>
       </div>
     </div>
@@ -1026,12 +1027,12 @@ async function showSession(sessionId) {
 }
 
 // --- Timeline ---
-const projectColors = {};
-const palette = ['#e94560','#4ecca3','#533483','#f39c12','#3498db','#e74c3c','#2ecc71','#9b59b6','#1abc9c','#e67e22'];
-let colorIdx = 0;
+// Palette ordered for max contrast between adjacent entries — top-ranked projects
+// get the first slots, so they're always visually distinct from each other.
+const palette = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#17becf','#e377c2','#bcbd22','#8c564b','#7f7f7f'];
+let projectColors = {};
 function getColor(project) {
-  if (!projectColors[project]) projectColors[project] = palette[colorIdx++ % palette.length];
-  return projectColors[project];
+  return projectColors[project] || palette[palette.length - 1];
 }
 
 async function loadTimeline() {
@@ -1039,6 +1040,12 @@ async function loadTimeline() {
   const res = await fetch(`/api/timeline?granularity=${g}`);
   const data = await res.json();
   if (!data.length) { $('#timeline-chart').innerHTML = '<div class="empty">No data</div>'; return; }
+
+  const projectCounts = {};
+  data.forEach(d => { projectCounts[d.project] = (projectCounts[d.project] || 0) + d.count; });
+  const sortedProjects = Object.entries(projectCounts).sort((a, b) => b[1] - a[1]);
+  projectColors = {};
+  sortedProjects.forEach(([p], i) => { projectColors[p] = palette[i % palette.length]; });
 
   const periods = {};
   let maxCount = 0;
@@ -1060,9 +1067,6 @@ async function loadTimeline() {
     return `<div class="chart-bar"><div style="display:flex;flex-direction:column">${segments}</div><div class="label">${label}</div></div>`;
   }).join('');
 
-  const projectCounts = {};
-  data.forEach(d => { projectCounts[d.project] = (projectCounts[d.project] || 0) + d.count; });
-  const sortedProjects = Object.entries(projectCounts).sort((a, b) => b[1] - a[1]);
   $('#timeline-legend').innerHTML = sortedProjects.map(([p, cnt]) =>
     `<div class="timeline-legend-item" data-project="${p}"><div class="timeline-legend-swatch" style="background:${getColor(p)}"></div>${p} (${cnt})</div>`
   ).join('');
@@ -1295,9 +1299,24 @@ async function showDeletedSession(sessionId) {
   `;
 }
 
+// --- Dump Timesheet ---
+async function doDumpTimesheet(btn) {
+  btn.textContent = 'Dumping...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/dump-timesheet', { method: 'POST' });
+    const data = await res.json();
+    btn.textContent = 'Dumped!';
+    setTimeout(() => { btn.textContent = 'Dump Timesheet'; btn.disabled = false; }, 2000);
+    alert(`Timesheet dumped (${data.row_count} rows):\nCSV:  ${data.csv_path}\nXLSX: ${data.xlsx_path}`);
+  } catch(e) {
+    btn.textContent = 'Error';
+    setTimeout(() => { btn.textContent = 'Dump Timesheet'; btn.disabled = false; }, 2000);
+  }
+}
+
 // --- Backup ---
-async function doBackup() {
-  const btn = document.querySelectorAll('nav .reindex-btn')[0];
+async function doBackup(btn) {
   btn.textContent = 'Backing up...';
   btn.disabled = true;
   try {
@@ -1313,8 +1332,7 @@ async function doBackup() {
 }
 
 // --- Reindex ---
-async function doReindex() {
-  const btn = $('nav .reindex-btn');
+async function doReindex(btn) {
   btn.textContent = 'Reindexing...';
   btn.disabled = true;
   try {
