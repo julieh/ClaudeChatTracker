@@ -27,6 +27,11 @@ nav .right { margin-left: auto; }
 nav .reindex-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: inherit; }
 nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
 
+/* Kill Process button (fixed bottom-right) */
+.kill-btn { position: fixed; bottom: 16px; right: 16px; background: var(--surface); border: 1px solid var(--red); color: var(--red); padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-family: inherit; z-index: 1000; opacity: 0.7; }
+.kill-btn:hover { opacity: 1; background: var(--red); color: var(--text2); }
+.kill-btn:disabled { opacity: 0.5; cursor: default; }
+
 /* Main */
 .main { flex: 1; overflow: hidden; display: flex; }
 .view { display: none; flex: 1; overflow: auto; padding: 20px; }
@@ -211,6 +216,7 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
     <div class="tab" data-view="deleted">Deleted</div>
   </div>
   <div class="right">
+    <button class="reindex-btn" id="slack-sync-btn" onclick="doSlackSync(this)" title="Pull your own Slack messages since last sync">Sync Slack</button>
     <button class="reindex-btn" onclick="doDumpTimesheet(this)">Dump Timesheet</button>
     <button class="reindex-btn" onclick="doBackup(this)">Backup</button>
     <button class="reindex-btn" onclick="doReindex(this)">Reindex</button>
@@ -538,6 +544,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   loadProjects();
+  refreshSlackStatus();
 });
 
 // Tabs
@@ -1331,6 +1338,53 @@ async function doBackup(btn) {
   }
 }
 
+// --- Slack sync ---
+async function refreshSlackStatus() {
+  const btn = document.getElementById('slack-sync-btn');
+  if (!btn) return;
+  try {
+    const res = await fetch('/api/slack/status');
+    const data = await res.json();
+    if (!data.configured) {
+      btn.disabled = true;
+      btn.title = 'Set SLACK_USER_TOKEN env var to enable. See README.';
+      btn.textContent = 'Sync Slack (off)';
+      return;
+    }
+    btn.disabled = false;
+    btn.textContent = 'Sync Slack';
+    if (data.last_sync_completed_at) {
+      btn.title = `Last sync: ${data.last_sync_completed_at} (${data.message_count} msgs cached)`;
+    } else {
+      btn.title = 'Pull your Slack messages since last sync (first run goes back 30 days)';
+    }
+  } catch(e) {
+    /* leave button as-is */
+  }
+}
+async function doSlackSync(btn) {
+  btn.textContent = 'Syncing Slack...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/slack/sync', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      btn.textContent = 'Error';
+      alert('Slack sync failed: ' + (data.error || 'unknown error'));
+      setTimeout(refreshSlackStatus, 2000);
+      return;
+    }
+    const truncMsg = data.truncated ? ' (partial — click again to continue)' : '';
+    btn.textContent = `Synced ${data.inserted} new${truncMsg}`;
+    alert(`Slack sync complete:\n  ${data.inserted} new messages\n  ${data.skipped} already present\n  ${data.elapsed_seconds}s elapsed${data.truncated ? '\n  (timed out — click again to continue)' : ''}`);
+    setTimeout(refreshSlackStatus, 2500);
+  } catch(e) {
+    btn.textContent = 'Error';
+    alert('Slack sync failed: ' + e.message);
+    setTimeout(refreshSlackStatus, 2000);
+  }
+}
+
 // --- Reindex ---
 async function doReindex(btn) {
   btn.textContent = 'Reindexing...';
@@ -1378,6 +1432,21 @@ function copyFallback(btn, text, origLabel) {
   btn.textContent = 'Copied!';
   setTimeout(() => btn.textContent = origLabel, 1000);
 }
+
+// --- Kill Process ---
+async function doKill(btn) {
+  if (!confirm('Kill the Claude Chats server process (port 5111)?')) return;
+  btn.textContent = 'Killing...';
+  btn.disabled = true;
+  try {
+    await fetch('/api/kill', { method: 'POST' });
+  } catch(e) {
+    // Expected: server dies before/while responding.
+  }
+  btn.textContent = 'Server stopped';
+}
 </script>
+
+<button class="kill-btn" onclick="doKill(this)" title="Run: kill $(lsof -ti:5111)">Kill Process</button>
 </body>
 </html>

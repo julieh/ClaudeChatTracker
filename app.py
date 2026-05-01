@@ -1,7 +1,9 @@
 """Flask server for Claude Chats search app."""
 
+import os
 import shutil
 import sqlite3
+import subprocess
 import threading
 import json
 import time
@@ -14,6 +16,7 @@ from indexer import (
     load_session_names, decode_folder_name,
 )
 from timesheet import fetch_rows, write_csv, write_xlsx
+from slack_sync import run_slack_sync, get_status as get_slack_status, SlackError
 
 app = Flask(__name__)
 
@@ -902,6 +905,40 @@ def dump_timesheet():
 def reindex():
     stats = run_index(full_rebuild=False)
     return jsonify(stats)
+
+
+@app.route("/api/slack/status")
+def slack_status():
+    token_set = bool(os.environ.get("SLACK_USER_TOKEN", "").strip())
+    status = get_slack_status(DB_PATH)
+    status["configured"] = token_set
+    return jsonify(status)
+
+
+@app.route("/api/slack/sync", methods=["POST"])
+def slack_sync():
+    token = os.environ.get("SLACK_USER_TOKEN", "").strip()
+    if not token:
+        return jsonify({
+            "error": "SLACK_USER_TOKEN env var not set. See README for setup."
+        }), 503
+    try:
+        result = run_slack_sync(DB_PATH, token)
+    except SlackError as e:
+        # Never echo the token even if it appears in an exception path.
+        return jsonify({"error": str(e)}), 502
+    return jsonify(result)
+
+
+@app.route("/api/kill", methods=["POST"])
+def kill_process():
+    """Kill whatever is listening on port 5111 (i.e. this server). Runs in a
+    background thread so the HTTP response returns before the process dies."""
+    def _kill():
+        time.sleep(0.3)
+        subprocess.run(["sh", "-c", "kill $(lsof -ti:5111)"])
+    threading.Thread(target=_kill, daemon=True).start()
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":

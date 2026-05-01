@@ -171,6 +171,26 @@ def init_db(conn: sqlite3.Connection):
         """)
     except sqlite3.OperationalError:
         pass  # already exists
+    # Slack sync tables — separate from `messages` so Slack rows don't leak into
+    # search/sessions/projects/timeline/stats endpoints.
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS slack_messages (
+            slack_ts TEXT PRIMARY KEY,
+            channel_id TEXT NOT NULL,
+            channel_name TEXT NOT NULL,
+            project TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            content TEXT NOT NULL,
+            edited_at TEXT DEFAULT '',
+            thread_ts TEXT DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_slack_messages_timestamp ON slack_messages(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_slack_messages_channel ON slack_messages(channel_id);
+        CREATE TABLE IF NOT EXISTS slack_sync_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+    """)
 
 
 def load_session_names() -> dict:

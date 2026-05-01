@@ -5,4 +5,7 @@ __pycache__/
 .playwright-mcp/
 *.zip
 *.csv
+*.xlsx
+*.xls
+~$*
 00ai/timedumps

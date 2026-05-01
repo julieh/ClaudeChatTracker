@@ -68,15 +68,21 @@ def fetch_rows(db_path: Path, days: int = 4) -> list[dict]:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     raw = conn.execute("""
-        SELECT m.timestamp, m.project, m.session_id, m.content,
-               COALESCE(NULLIF(s.name, ''), NULLIF(s.slug, ''), '') AS session_title
-        FROM messages m
-        LEFT JOIN sessions s ON s.session_id = m.session_id
-        WHERE m.timestamp >= ? AND m.timestamp < ?
-          AND m.content NOT LIKE '<task-notification>%'
-          AND m.content NOT LIKE '<local-command-stdout>%'
-          AND m.content NOT LIKE '<bash-stdout>%'
-        ORDER BY m.timestamp ASC
+        SELECT timestamp, project, session_id, content, session_title FROM (
+            SELECT m.timestamp, m.project, m.session_id, m.content,
+                   COALESCE(NULLIF(s.name, ''), NULLIF(s.slug, ''), '') AS session_title
+            FROM messages m
+            LEFT JOIN sessions s ON s.session_id = m.session_id
+            WHERE m.content NOT LIKE '<task-notification>%'
+              AND m.content NOT LIKE '<local-command-stdout>%'
+              AND m.content NOT LIKE '<bash-stdout>%'
+            UNION ALL
+            SELECT timestamp, project, channel_id AS session_id, content,
+                   channel_name AS session_title
+            FROM slack_messages
+        )
+        WHERE timestamp >= ? AND timestamp < ?
+        ORDER BY timestamp ASC
     """, (lookback_utc, end_utc)).fetchall()
     conn.close()
 

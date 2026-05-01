@@ -94,6 +94,35 @@ If you don't want it, just say "skip" when the setup prompts you.
 
 ---
 
+## Optional: Slack sync
+
+The **Sync Slack** button pulls **only your own** Slack messages into a local `slack_messages` table, so they show up in the Dump Timesheet export alongside your Claude messages. It's read-only — the token never has write scopes, and no code path in this repo calls a write API.
+
+### Setup (one time)
+
+1. Create a private Slack app at https://api.slack.com/apps → *Create New App* → *From scratch*. Name it (e.g. "claudechats-sync") and pick your workspace.
+2. On the app's **OAuth & Permissions** page, add these **User Token Scopes** (the read-only set):
+   - `channels:read`, `channels:history`
+   - `groups:read`, `groups:history`
+   - `im:read`, `im:history`
+   - `mpim:read`, `mpim:history`
+   - `users:read`
+3. Click **Install to Workspace** at the top of the OAuth page (your workspace may require admin approval).
+4. Copy the **User OAuth Token** — it starts with `xoxp-`.
+5. Set the env var before launching the app:
+   ```bash
+   export SLACK_USER_TOKEN=xoxp-...
+   python app.py
+   ```
+6. Click **Sync Slack** in the UI. The first run pulls the past 30 days of your messages; later clicks pull only what's new since the last successful sync.
+
+**Notes**
+- Messages from other people are dropped server-side before they ever reach SQLite.
+- `transcripts.db` is in `.gitignore` — don't commit it.
+- To rewind the cursor (e.g. to backfill more history), update `slack_sync_meta` where `key='last_sync_ts'` to an earlier Slack `ts`, or delete the row to start over from 30 days ago.
+
+---
+
 ## Your data stays local
 
 ClaudeChatTracker runs entirely on your machine. It reads JSONL transcripts from `~/.claude/projects/`, writes to a local `transcripts.db`, and serves on `localhost:5111` only. **Nothing is sent anywhere.**
