@@ -119,4 +119,6 @@ Normally: just restart `python3 app.py`. Schema migrations and re-indexing are a
 
 Manual steps are listed below, newest first. Find the entry just after your last pull and do everything from there upward.
 
+- **2026-05-01** (49245bb) — Slack sync now available. Optional. To enable, set `SLACK_USER_TOKEN=xoxp-...` before launching `python app.py` (see the *Slack sync (optional)* section in `README.md` for token + scopes). Without the env var, the Sync Slack button just stays disabled — search, browse, dashboard, timesheet (Claude rows only) all keep working. This commit also added a Kill Process button and started including Slack rows in the timesheet dump; neither needs a manual step.
+- **2026-04-30** (31bc649) — Dump Timesheet button. No manual step. Output lands in `00ai/timedumps/`.
 - **2026-04-22** (c7ef914) — New Dashboard view. To populate it with live sessions, add the 4 hooks from the "Optional: Enable live Dashboard" section above to `~/.claude/settings.json` and restart your Claude Code sessions. Skipping this is fine — the Dashboard just stays empty.

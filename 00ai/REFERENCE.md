@@ -16,20 +16,25 @@ A Flask + SQLite + vanilla JS single-page app for searching, browsing, and organ
 ```
 app.py                 # Flask server - all API routes
 indexer.py             # JSONL parser + SQLite FTS5 indexer
-templates/index.html   # Entire frontend (HTML + CSS + JS, ~900 lines)
+slack_sync.py          # Optional Slack message capture (read-only)
+timesheet.py           # CSV/XLSX timesheet export
+templates/index.html   # Entire frontend (HTML + CSS + JS)
 transcripts.db         # SQLite database (generated, gitignored)
 requirements.txt       # Python dependencies
+FEATURES.md            # User-facing feature reference
 ```
 
 ## Database Schema
 
 ### Tables
-- **messages** - Individual human messages (uuid, session_id, project, timestamp, content, cwd, git_branch, jsonl_file)
-- **messages_fts** - FTS5 virtual table over messages (content, project)
-- **sessions** - Aggregated session info (session_id, project, first_ts, last_ts, message_count, file_missing 0/1)
-- **session_meta** - Per-session metadata (session_id, starred 0-5, archived 0/1, hidden 0/1)
+- **messages** - Individual human messages (uuid, session_id, project, timestamp, content, cwd, git_branch, jsonl_file, assistant_response)
+- **messages_fts** - FTS5 virtual table over messages (content, assistant_response)
+- **sessions** - Aggregated session info (session_id, project, first_ts, last_ts, message_count, name, slug, file_missing 0/1)
+- **session_meta** - Per-session metadata (session_id, starred 0-5, archived 0/1, hidden 0/1, complete 0/1)
 - **session_tags** - Many-to-many session tags (session_id, tag)
 - **index_meta** - Tracks which JSONL files have been indexed and their mtimes
+- **slack_messages** - User's own Slack messages (slack_ts, channel_id, channel_name, project, timestamp, content, edited_at, thread_ts). Kept separate from `messages` so Slack never appears in Claude search/stats.
+- **slack_sync_meta** - Slack sync cursor (`key`, `value`); the key `last_sync_ts` holds the highest Slack ts seen.
 
 ### Key indexes
 - `idx_messages_session`, `idx_messages_project`, `idx_messages_timestamp`
@@ -40,13 +45,14 @@ requirements.txt       # Python dependencies
 | Route | Method | Description |
 |-------|--------|-------------|
 | `/` | GET | Serves the SPA |
-| `/api/search?q=&project=&from=&to=&starred=&min_stars=&tag=&page=` | GET | FTS search with filters, paginated |
+| `/api/search?q=&project=&from=&to=&starred=&min_stars=&tag=&page=` | GET | FTS search with filters, paginated. Filter-only search (no `q`) is allowed when at least one filter is set. |
 | `/api/projects` | GET | List all projects with counts, ordered by last_ts DESC |
-| `/api/sessions?project=&archived=&starred=&min_stars=&tag=&sort=` | GET | Sessions list. `project` supports comma-separated multi-select. Sort: date_desc/date_asc/stars_desc/stars_asc |
+| `/api/sessions?project=&archived=&starred=&min_stars=&tag=&complete=&sort=` | GET | Sessions list. `project` supports comma-separated multi-select. `complete` is `open` / `done` / unset. Sort: date_desc/date_asc/stars_desc/stars_asc |
 | `/api/session/<id>` | GET | All messages in a session |
-| `/api/session/<id>/meta` | GET | Starred/archived/tags for a session |
-| `/api/session/<id>/star` | PUT | Set star rating (body: `{rating: 0-5}`) |
+| `/api/session/<id>/meta` | GET | Starred/archived/complete/tags for a session |
+| `/api/session/<id>/star` | PUT | Set star rating (body: `{rating: 0-5}`). Re-applying the current rating clears it. |
 | `/api/session/<id>/archive` | PUT | Toggle archived flag |
+| `/api/session/<id>/complete` | PUT | Toggle complete flag (Open ↔ Complete) |
 | `/api/session/<id>/tags` | PUT | Replace tags (body: `{tags: [...]}`) |
 | `/api/session/<id>/hide` | PUT | Soft-delete (set hidden=1) |
 | `/api/session/<id>/unhide` | PUT | Restore a hidden session |
@@ -55,20 +61,29 @@ requirements.txt       # Python dependencies
 | `/api/stats` | GET | Aggregate statistics |
 | `/api/deleted?project=&starred=&min_stars=&tag=&sort=` | GET | List hidden/deleted sessions (same filters as /api/sessions) |
 | `/api/deleted/projects` | GET | Projects that have at least one hidden session |
-| `/api/reindex` | POST | Re-index transcripts |
-| `/api/dashboard` | GET | Live session status. Returns `{active, recently_closed, generated_at}`. Reads in-memory state populated by Claude Code hooks — not from the DB. |
+| `/api/reindex` | POST | Re-index transcripts (incremental) |
+| `/api/backup` | POST | Copy `transcripts.db` to `~/claudeChatBackups/<YYYY-MM-DD-HHMM>_transcripts.db`. Returns `{path}`. |
+| `/api/dump-timesheet` | POST | Export the last 4 NY-local calendar days of Claude + Slack messages to `00ai/timedumps/<stamp>_timesheet.{csv,xlsx}`. Returns `{csv_path, xlsx_path, row_count}`. |
+| `/api/kill` | POST | Shut down the Flask server (kills whatever owns port 5111) after a 0.3s delay so the response can return first. |
+| `/api/slack/status` | GET | Slack sync status: `{configured, last_sync_ts, message_count, ...}`. `configured` is true iff `SLACK_USER_TOKEN` is set. |
+| `/api/slack/sync` | POST | Run a Slack sync. 503 if `SLACK_USER_TOKEN` is unset; 502 on Slack API errors. Returns counts + `truncated` flag. |
+| `/api/dashboard` | GET | Live session status. Returns `{active, recently_closed, generated_at}`. Reads in-memory state populated by Claude Code hooks — not from the DB. Each entry is enriched with name/first_prompt/last_human/last_assistant scanned from the JSONL. |
+| `/api/dashboard/scan` | POST | Walk `~/.claude/projects/` and add any recent (default 24h, override via `?hours=`) sessions we don't already track. Hook-populated entries are never overwritten. |
+| `/api/dashboard/session/<id>/transcript` | GET | Full human+assistant transcript for inline expand on the Dashboard. Prefers DB rows; falls back to scanning the JSONL for live sessions. |
+| `/api/dashboard/session/<id>` | DELETE | Manually remove a session from the live dashboard (active or recently_closed). |
 | `/api/hook/session-start` | POST | Hook endpoint: Claude Code `SessionStart`. Inserts/updates session, state=`waiting`. Accepts JSON body with `session_id` and `cwd`. |
 | `/api/hook/user-prompt-submit` | POST | Hook endpoint: Claude Code `UserPromptSubmit`. Sets state=`working`. |
 | `/api/hook/stop` | POST | Hook endpoint: Claude Code `Stop`. Sets state=`waiting`. |
-| `/api/hook/session-end` | POST | Hook endpoint: Claude Code `SessionEnd`. Moves session to `recently_closed` (bounded to 5 most recent). |
+| `/api/hook/session-end` | POST | Hook endpoint: Claude Code `SessionEnd`. Moves session to `recently_closed` (bounded to 10 most recent). |
 
 ## Frontend Architecture
 
 ### Views (tabs)
-1. **Dashboard** (default) - Live view of currently-running Claude Code sessions, grouped by state (working / waiting / recently closed). Populated by Claude Code hooks POSTing to `/api/hook/*`. Auto-refreshes every 5s while visible; polling stops when switching views. In-memory only — resets when Flask restarts.
-2. **Search** - FTS search with project/date/star/tag filters, paginated results
-3. **Browse** - Left sidebar with project list (multi-select), right panel shows sessions
-4. **Timeline** - Stacked bar chart of messages over time by project
+The tab bar is in this order; **Dashboard is the default tab on load**.
+1. **Dashboard** - Live view of currently-running Claude Code sessions, grouped by state (working / waiting / recently closed). Populated by Claude Code hooks POSTing to `/api/hook/*`. Auto-refreshes every 5s while visible; polling stops when switching views. In-memory only — resets when Flask restarts; on startup the server runs a 24-hour disk scan to repopulate from JSONL mtimes. Per-card actions: Browse ↗, Expand transcript (inline), and dismiss (✕).
+2. **Search** - FTS search with project/date/star/tag filters, paginated results. Filter-only search works when no query text is set.
+3. **Browse** - Left sidebar with project list (multi-select), right panel shows sessions. Filter bar includes Open / Complete / All.
+4. **Timeline** - Stacked bar chart of messages over time by project, with hover-linked legend.
 5. **Stats** - Summary cards and tables
 6. **Deleted** - Browse/restore soft-deleted (hidden) sessions, same sidebar+filters layout as Browse
 

@@ -264,6 +264,67 @@ and delete the four entries we added (`SessionStart`, `UserPromptSubmit`,
 `Stop`, `SessionEnd`) — or paste this prompt into Claude Desktop:
 *'Remove the Claude Chats dashboard hooks from my Claude settings.'*"
 
+## Step 6.5 — Optional: turn on Slack sync
+
+Ask the user, exactly:
+
+> "One more optional thing. The app has a 'Sync Slack' button that pulls
+> **only your own** Slack messages into the local database, so they show up
+> alongside your Claude prompts when you click 'Dump Timesheet' (useful if
+> your day is part Claude work, part Slack conversations). Two honest notes:
+>
+> 1. **It's read-only.** The token has no write scopes — this app cannot
+>    post to Slack on your behalf, only read your own messages.
+> 2. **It's optional.** If you skip it, the 'Sync Slack' button just stays
+>    disabled and everything else works fine.
+>
+> Want me to set it up, or skip it?"
+
+**If they skip:** great, move on to Step 7.
+
+**If they want it:** the user needs to do the parts you can't do for them
+(creating the Slack app, copying the token), and you do the rest.
+
+### What you'll do
+
+1. **Walk the user through token creation.** They need to create a private
+   Slack app and copy a User OAuth Token (`xoxp-...`). The full procedure —
+   the exact menu path, the exact set of scopes to add, and where the token
+   appears — is in the *Slack sync (optional)* section of `README.md`. Read
+   that section to the user step by step (don't paraphrase the scope list —
+   they need all of `channels:read`, `channels:history`, `groups:read`,
+   `groups:history`, `im:read`, `im:history`, `mpim:read`, `mpim:history`,
+   `users:read`).
+2. **Help them set the env var.** They have two options; pick whichever fits
+   their setup:
+   - **Per-session (simple, what `README.md` shows):** before launching the
+     app, run `export SLACK_USER_TOKEN=xoxp-...` in the same terminal. This
+     means they need to set it again every time they reopen the terminal.
+     Fine for one-off testing.
+   - **Persistent (recommended for daily use):** append
+     `export SLACK_USER_TOKEN=xoxp-...` to their shell rc file (`~/.zshrc` on
+     a default Mac, `~/.bash_profile` if they're on bash). Tell them to open
+     a new terminal afterwards so the variable is loaded. **Never** check
+     this into git — `~/.zshrc` lives in their home directory, not in this
+     repo, so that's safe by default.
+3. **Restart the app** so it picks up the new env var. If the app is
+   currently running, ask the user to say "stop the app" first; once it's
+   down, relaunch with `python3 app.py`.
+4. **Verify it worked.** Tell the user to refresh `http://localhost:5111`
+   and look at the Sync Slack button. If it's no longer grayed out, hover
+   text now shows last sync time, and clicking it pulls real messages — it
+   worked. If it's still disabled, the env var didn't make it into the
+   process; usually that means the app wasn't restarted in the same terminal
+   the `export` ran in.
+
+### How to turn it off later
+
+Tell the user: "If you change your mind, just remove the
+`SLACK_USER_TOKEN` line from your shell rc file (or unset the variable in
+the running terminal) and restart the app. The Slack messages already
+synced will stay in the database; nothing is deleted automatically. If you
+want to wipe them, ask Claude to delete the `slack_messages` table."
+
 ## Step 7 — Offer a one-click shortcut
 
 Ask the user:

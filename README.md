@@ -33,6 +33,8 @@
 
 ## Features
 
+See [`00ai/FEATURES.md`](00ai/FEATURES.md) for the complete reference — every view, button, sync mechanism, keyboard shortcut, and where files land on disk.
+
 ### 🔎 Find
 - **Full-text search** across every prompt and response (SQLite FTS5)
 - **Filter** by date range, project, tag, or minimum star rating
