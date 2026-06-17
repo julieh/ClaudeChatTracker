@@ -13,6 +13,7 @@ from flask import Flask, jsonify, request, render_template
 from indexer import (
     run_index, DB_PATH, PROJECTS_DIR,
     is_human_message, is_command_message, format_command_content, extract_content,
+    is_plan_answer_message, format_plan_answer_content, is_skip_first_command,
     load_session_names, decode_folder_name,
 )
 from timesheet import fetch_rows, write_csv, write_xlsx
@@ -242,7 +243,7 @@ def _first_prompt_from_transcript(transcript_path, limit=200):
                 return text[:limit]
         elif is_command_message(entry):
             cmd = format_command_content(extract_content(entry))
-            if cmd and cmd.strip().split()[0] != "/clear":
+            if cmd and not is_skip_first_command(cmd):
                 return cmd[:limit]
     return ""
 
@@ -264,6 +265,10 @@ def _last_exchange_from_transcript(transcript_path, limit=200):
             cmd = format_command_content(extract_content(entry))
             if cmd:
                 last_human = cmd
+        elif is_plan_answer_message(entry):
+            text = format_plan_answer_content(entry)
+            if text:
+                last_human = text
     return last_human[:limit], last_assistant[:limit]
 
 
@@ -369,6 +374,10 @@ def dashboard_session_transcript(session_id):
             cmd = format_command_content(extract_content(entry))
             if cmd:
                 messages.append({"role": "human", "text": cmd, "ts": ts})
+        elif is_plan_answer_message(entry):
+            text = format_plan_answer_content(entry)
+            if text:
+                messages.append({"role": "human", "text": text, "ts": ts})
     return jsonify({"messages": messages, "source": "jsonl"})
 
 
@@ -583,13 +592,15 @@ def sessions():
     for r in rows:
         d = dict(r)
         first_msgs = conn.execute("""
-            SELECT content FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 2
+            SELECT content FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 5
         """, [d["session_id"]]).fetchall()
         first_content = ""
         if first_msgs:
             first_content = first_msgs[0]["content"]
-            if first_content.strip() == "/clear" and len(first_msgs) > 1:
-                first_content = first_msgs[1]["content"]
+            for m in first_msgs:
+                if not is_skip_first_command(m["content"]):
+                    first_content = m["content"]
+                    break
         d["first_message"] = first_content[:300]
         last_msgs = conn.execute("""
             SELECT content FROM messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT 2
@@ -666,11 +677,27 @@ def stats():
         GROUP BY day ORDER BY count DESC LIMIT 10
     """).fetchall()
 
+    # Tombstones: sessions whose JSONL file is gone but rows still live in the DB.
+    # Excludes user-deleted (hidden) sessions; those live in the Deleted view.
+    tombstone_sessions = conn.execute("""
+        SELECT COUNT(*) FROM sessions s
+        WHERE s.file_missing = 1
+        AND NOT EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = s.session_id AND sh.hidden = 1)
+    """).fetchone()[0]
+    tombstone_messages = conn.execute("""
+        SELECT COUNT(*) FROM messages m
+        JOIN sessions s ON s.session_id = m.session_id
+        WHERE s.file_missing = 1
+        AND NOT EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = m.session_id AND sh.hidden = 1)
+    """).fetchone()[0]
+
     conn.close()
     return jsonify({
         "total_messages": total_messages,
         "total_sessions": total_sessions,
         "total_projects": total_projects,
+        "tombstone_sessions": tombstone_sessions,
+        "tombstone_messages": tombstone_messages,
         "per_project": [dict(r) for r in per_project],
         "most_active_days": [dict(r) for r in most_active],
     })
@@ -820,13 +847,15 @@ def deleted_sessions():
     for r in rows:
         d = dict(r)
         first_msgs = conn.execute("""
-            SELECT content FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 2
+            SELECT content FROM messages WHERE session_id = ? ORDER BY timestamp ASC LIMIT 5
         """, [d["session_id"]]).fetchall()
         first_content = ""
         if first_msgs:
             first_content = first_msgs[0]["content"]
-            if first_content.strip() == "/clear" and len(first_msgs) > 1:
-                first_content = first_msgs[1]["content"]
+            for m in first_msgs:
+                if not is_skip_first_command(m["content"]):
+                    first_content = m["content"]
+                    break
         d["first_message"] = first_content[:300]
         result.append(d)
 

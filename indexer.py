@@ -55,6 +55,43 @@ def is_command_message(record: dict) -> bool:
     return "<command-name>" in content
 
 
+def is_plan_answer_message(record: dict) -> bool:
+    """User answer to AskUserQuestion: type=user with toolUseResult.answers."""
+    if record.get("type") != "user":
+        return False
+    if record.get("isMeta", False):
+        return False
+    tur = record.get("toolUseResult")
+    if not isinstance(tur, dict):
+        return False
+    answers = tur.get("answers")
+    return isinstance(answers, dict) and bool(answers)
+
+
+def format_plan_answer_content(record: dict) -> str:
+    """Render AskUserQuestion answers as a single Q/A block for indexing."""
+    tur = record.get("toolUseResult", {}) or {}
+    answers = tur.get("answers", {}) or {}
+    annotations = tur.get("annotations", {}) or {}
+    lines = ["[Plan mode answer]"]
+    for q, a in answers.items():
+        lines.append(f"Q: {q}")
+        lines.append(f"A: {a}")
+        ann = annotations.get(q)
+        notes = ann.get("notes", "") if isinstance(ann, dict) else ""
+        if notes and notes != a:
+            lines.append(f"Notes: {notes}")
+    return "\n".join(lines)
+
+
+def is_skip_first_command(content: str) -> bool:
+    """True if a command line should not count as a session's 'first message'."""
+    if not content or not content.strip():
+        return False
+    head = content.strip().split()[0]
+    return head in ("/clear", "/model")
+
+
 def format_command_content(content: str) -> str:
     """Extract a clean slash command string from XML-tagged content."""
     match = re.search(r"<command-name>(.*?)</command-name>", content)
@@ -233,17 +270,54 @@ def _extract_slug(jsonl_path: str, session_slugs: dict):
         pass
 
 
+def _extract_name(jsonl_path: str, session_names: dict):
+    """Scan JSONL for the last custom-title record and record sessionId -> title.
+
+    Claude Code emits {"type":"custom-title","customTitle":...,"sessionId":...} on /rename.
+    These records are durable in the transcript, so they survive terminal close —
+    unlike ~/.claude/sessions/{pid}.json which is keyed by PID and inconsistently populated.
+    """
+    last_sid = ""
+    last_name = ""
+    try:
+        with open(jsonl_path, "r") as f:
+            for line in f:
+                if '"custom-title"' not in line:
+                    continue
+                try:
+                    record = json.loads(line.strip())
+                except json.JSONDecodeError:
+                    continue
+                if record.get("type") != "custom-title":
+                    continue
+                title = record.get("customTitle", "")
+                sid = record.get("sessionId", "")
+                if title:
+                    last_name = title
+                if sid:
+                    last_sid = sid
+    except (OSError, UnicodeDecodeError):
+        return
+    if last_sid and last_name:
+        session_names[last_sid] = last_name
+
+
 def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
     """Parse a single JSONL file and insert human messages with assistant responses.
-    Returns (session_id, slug) extracted from records."""
-    # Remove old messages from this file
-    conn.execute("DELETE FROM messages WHERE jsonl_file = ?", (jsonl_path,))
+    Returns (session_id, slug, custom_title) extracted from records.
 
+    Re-indexing relies on INSERT OR REPLACE keyed on `uuid` to update existing rows.
+    We intentionally do NOT bulk-delete rows by jsonl_file first — if Claude Code
+    truncates a transcript in place during cleanup, the messages that disappear
+    from the file must remain in the DB as tombstones (see 'Survives Claude's
+    cleanup' in demo-walkthrough.md).
+    """
     # Collect human messages and pair each with the assistant response that follows it
     human_messages = []  # list of [uuid, session_id, project, ts, content, cwd, branch, file, assistant_response]
     last_assistant_text = ""
     slug = ""
     file_session_id = ""
+    custom_title = ""
     try:
         with open(jsonl_path, "r") as f:
             for line in f:
@@ -259,6 +333,10 @@ def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
                     slug = record["slug"]
                 if not file_session_id and record.get("sessionId"):
                     file_session_id = record["sessionId"]
+                if record.get("type") == "custom-title":
+                    title = record.get("customTitle", "")
+                    if title:
+                        custom_title = title
 
                 if record.get("type") == "assistant":
                     text = extract_content(record)
@@ -301,8 +379,26 @@ def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
                         jsonl_path,
                         "",  # assistant_response placeholder
                     ])
+                elif is_plan_answer_message(record):
+                    if human_messages and last_assistant_text:
+                        human_messages[-1][-1] = last_assistant_text
+                    last_assistant_text = ""
+                    content = format_plan_answer_content(record)
+                    if not content:
+                        continue
+                    human_messages.append([
+                        record.get("uuid", ""),
+                        record.get("sessionId", ""),
+                        project,
+                        record.get("timestamp", ""),
+                        content,
+                        record.get("cwd", ""),
+                        record.get("gitBranch", ""),
+                        jsonl_path,
+                        "",  # assistant_response placeholder
+                    ])
     except (OSError, UnicodeDecodeError):
-        return "", ""
+        return "", "", ""
 
     # Attach final assistant response to the last human message
     if human_messages and last_assistant_text:
@@ -315,7 +411,7 @@ def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, human_messages)
 
-    return file_session_id, slug
+    return file_session_id, slug, custom_title
 
 
 def rebuild_fts(conn: sqlite3.Connection):
@@ -372,7 +468,10 @@ def run_index(full_rebuild: bool = False) -> dict:
             full_rebuild = True
 
     if full_rebuild:
-        conn.execute("DELETE FROM messages")
+        # Wipe index_meta so every existing file gets re-processed. We deliberately
+        # do NOT delete from `messages`: index_file uses INSERT OR REPLACE on uuid,
+        # so re-indexing updates rows in place. Tombstones (rows whose source file
+        # is gone, or rows whose uuid was truncated out of an existing file) survive.
         conn.execute("DELETE FROM index_meta")
 
     # Get existing mtimes
@@ -382,6 +481,7 @@ def run_index(full_rebuild: bool = False) -> dict:
 
     files_indexed = 0
     session_slugs = {}
+    session_names_from_jsonl = {}
     if PROJECTS_DIR.exists():
         for folder in sorted(PROJECTS_DIR.iterdir()):
             if not folder.is_dir():
@@ -391,12 +491,15 @@ def run_index(full_rebuild: bool = False) -> dict:
                 fpath = str(jsonl_file)
                 mtime = jsonl_file.stat().st_mtime
                 if not full_rebuild and fpath in existing and existing[fpath] >= mtime:
-                    # Still extract slug from skipped files for rebuild_sessions
+                    # Still extract slug + custom-title from skipped files for rebuild_sessions
                     _extract_slug(fpath, session_slugs)
+                    _extract_name(fpath, session_names_from_jsonl)
                     continue
-                sid, slug = index_file(conn, fpath, project)
+                sid, slug, custom_title = index_file(conn, fpath, project)
                 if sid and slug:
                     session_slugs[sid] = slug
+                if sid and custom_title:
+                    session_names_from_jsonl[sid] = custom_title
                 conn.execute(
                     "INSERT OR REPLACE INTO index_meta (jsonl_file, mtime, indexed_at) VALUES (?, ?, ?)",
                     (fpath, mtime, time.time()),
@@ -404,8 +507,9 @@ def run_index(full_rebuild: bool = False) -> dict:
                 files_indexed += 1
 
     rebuild_fts(conn)
-    session_names = load_session_names()
-    rebuild_sessions(conn, session_names=session_names, session_slugs=session_slugs)
+    pid_names = load_session_names()
+    merged_names = {**pid_names, **session_names_from_jsonl}  # JSONL custom-title wins
+    rebuild_sessions(conn, session_names=merged_names, session_slugs=session_slugs)
     conn.commit()
 
     total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]

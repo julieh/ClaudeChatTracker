@@ -970,7 +970,7 @@ async function loadBrowseSessions() {
       <div class="session-actions">
         ${renderTagChips(s.tags || [], s.session_id)}
         <button class="btn-sm" onclick="event.stopPropagation();toggleArchive('${s.session_id}')">Archive</button>
-        ${s.last_message && s.last_message !== s.first_message ? `<span class="show-last btn-sm" onclick="event.stopPropagation();const i=this.closest('.session-item');i.classList.remove('show-last-on');this.textContent='Show Last';this.title='Hover to preview last message'" onmouseenter="const i=this.closest('.session-item');if(!i.classList.contains('show-last-on')){i.classList.add('show-last-on');this.textContent='Hide Last';this.title='Click to hide last message'}" title="Hover to preview last message">Show Last</span>` : ''}
+        ${s.last_message && s.last_message !== s.first_message ? `<span class="show-last btn-sm" onclick="event.stopPropagation();const i=this.closest('.session-item');i.classList.remove('show-last-on');this.textContent='Hover to Show Last';this.title='Hover to preview last message'" onmouseenter="const i=this.closest('.session-item');if(!i.classList.contains('show-last-on')){i.classList.add('show-last-on');this.textContent='Hide Last';this.title='Click to hide last message'}" title="Hover to preview last message">Hover to Show Last</span>` : ''}
         <button class="btn-sm" onclick="event.stopPropagation();hideSession('${s.session_id}')" title="Remove from app (keeps data in DB)">Delete</button>
       </div>
     </div>
@@ -1118,11 +1118,19 @@ async function loadTimeline() {
 async function loadStats() {
   const res = await fetch('/api/stats');
   const data = await res.json();
+  const tombstoneCard = data.tombstone_sessions > 0
+    ? `<div class="stat-card" title="Sessions whose JSONL file was deleted by Claude Code's cleanup. Still fully searchable here.">
+         <div class="num">${data.tombstone_sessions}</div>
+         <div class="label">Survived Claude's cleanup</div>
+         <div style="color:var(--text2);font-size:11px;margin-top:4px">${data.tombstone_messages} messages preserved</div>
+       </div>`
+    : '';
   let html = `
     <div class="stats-grid">
       <div class="stat-card"><div class="num">${data.total_messages}</div><div class="label">Messages</div></div>
       <div class="stat-card"><div class="num">${data.total_sessions}</div><div class="label">Sessions</div></div>
       <div class="stat-card"><div class="num">${data.total_projects}</div><div class="label">Projects</div></div>
+      ${tombstoneCard}
     </div>
     <h3 style="color:var(--text2);margin-bottom:12px;font-size:13px">PER PROJECT</h3>
     <table class="stats-table">

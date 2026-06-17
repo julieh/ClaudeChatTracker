@@ -88,7 +88,7 @@ The home view for organizing. Project sidebar on the left, sessions on the right
 
 **Session card:** message count, first-message preview, project (when
 multi-project), date range, star widget, Complete checkbox (top right), tag
-chips, **Show Last** toggle (reveals last message on hover), Archive button,
+chips, **Hover to Show Last** toggle (reveals last message on hover), Archive button,
 Delete button.
 
 A **dashed border** + 🚫 icon means the source JSONL has been deleted from
