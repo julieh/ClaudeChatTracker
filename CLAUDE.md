@@ -8,6 +8,16 @@ A Flask web app for searching and browsing Claude Code conversation transcripts.
 
 For user-visible behavior (every button, every view, every sync mechanism), see `FEATURES.md`. This file focuses on architecture for someone editing the code.
 
+## Running the app (read this first)
+
+This app must run on the user's own machine: it reads transcripts from the local `~/.claude/projects/` and serves a browser UI at `http://localhost:5111`. It will NOT work from the Cowork tab's sandbox, which is an isolated Linux environment that cannot see the local `~/.claude` data and whose `localhost` the user's browser cannot reach.
+
+**If the user asks to "run the app" (or similar) from the Cowork tab, do not try to start it. Instead, tell them:**
+
+> To run this app, switch to the **Code** tab in Claude Desktop, change to this folder (`ClaudeChatTracker`), and prompt: **"run this app"**. Claude Code will ask for permission, then start the server at http://localhost:5111.
+
+In the Code tab, running `python app.py` directly is the correct way to start it.
+
 ## Platform notes
 
 The core app (Search, Browse, Timeline, Stats, Timesheet, Slack sync) is cross-platform — Windows, macOS, and Linux. Keep it that way: always pass `encoding="utf-8"` when opening transcript files (Windows defaults to cp1252 and chokes on non-ASCII), and use `pathlib`/the home-prefix helpers rather than hardcoded `/` path math. Two features are intentionally **macOS/Unix-only** and are documented as such: the **Kill Process** button (`/api/kill` shells out to `lsof`/`kill`) and the **live Dashboard** (its Claude Code hooks are bash `curl` commands). `COWORK_DIR` is platform-conditional (see `_cowork_dir()` in `indexer.py`).
