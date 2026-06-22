@@ -9,6 +9,34 @@
 
 ---
 
+## Getting Started
+
+### Easy path (recommended — works for non-technical users)
+
+1. Clone this repo using your favorite Git client (mine is https://fork.dev/)
+2. Open the **Code tab** in Claude Desktop → **New Session** → select the cloned folder
+3. Paste this prompt:
+   ```
+   Follow instructions in 00ai/SetupInstructionsForClaude.md
+   ```
+
+That's it. Claude will check Python, install dependencies, start the app, and walk you through it one step at a time. About 5 minutes.
+
+### Manual path (for developers)
+
+```bash
+git clone git@github.com:julieh/ClaudeChatTracker.git
+cd ClaudeChatTracker
+pip install -r requirements.txt
+python app.py
+```
+
+Then open **http://localhost:5111**.
+
+First launch indexes all your transcripts (30–60s for large histories). After that, re-indexing is incremental — only changed files.
+
+---
+
 ## Sound familiar?
 
 > *"Where's that great prompt I wrote last Tuesday?"*
@@ -54,34 +82,6 @@ See [`00ai/FEATURES.md`](00ai/FEATURES.md) for the complete reference — every 
 - **Stats** — top-level counts plus your most active days and projects
 - **Live Dashboard** *(optional)* — see Claude Code sessions running right now: Working, Waiting, Recently Closed
 - **Backup** — one-click snapshot of your database to `~/claudeChatBackups/`
-
----
-
-## Getting Started
-
-### Easy path (recommended — works for non-technical users)
-
-1. Clone this repo using your favorite Git client (mine is https://fork.dev/)
-2. Open the **Code tab** in Claude Desktop → **New Session** → select the cloned folder
-3. Paste this prompt:
-   ```
-   Follow instructions in 00ai/SetupInstructionsForClaude.md
-   ```
-
-That's it. Claude will check Python, install dependencies, start the app, and walk you through it one step at a time. About 5 minutes.
-
-### Manual path (for developers)
-
-```bash
-git clone git@github.com:julieh/ClaudeChatTracker.git
-cd ClaudeChatTracker
-pip install -r requirements.txt
-python app.py
-```
-
-Then open **http://localhost:5111**.
-
-First launch indexes all your transcripts (30–60s for large histories). After that, re-indexing is incremental — only changed files.
 
 ---
 
