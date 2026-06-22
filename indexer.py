@@ -9,6 +9,10 @@ from pathlib import Path
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 SESSIONS_DIR = Path.home() / ".claude" / "sessions"
+# Claude desktop "Cowork" tab: each session runs the Claude Code CLI inside a
+# per-session sandbox, so its transcript is a standard CC JSONL nested under the
+# sandbox home, alongside a local_<sid>.json metadata file.
+COWORK_DIR = Path.home() / "Library" / "Application Support" / "Claude" / "local-agent-mode-sessions"
 DB_PATH = Path(__file__).parent / "transcripts.db"
 
 
@@ -131,7 +135,8 @@ def init_db(conn: sqlite3.Connection):
             assistant_response TEXT DEFAULT '',
             cwd TEXT,
             git_branch TEXT,
-            jsonl_file TEXT
+            jsonl_file TEXT,
+            source TEXT DEFAULT 'code'
         );
         CREATE TABLE IF NOT EXISTS sessions (
             session_id TEXT PRIMARY KEY,
@@ -141,7 +146,8 @@ def init_db(conn: sqlite3.Connection):
             message_count INTEGER DEFAULT 0,
             file_missing INTEGER DEFAULT 0,
             name TEXT DEFAULT '',
-            slug TEXT DEFAULT ''
+            slug TEXT DEFAULT '',
+            source TEXT DEFAULT 'code'
         );
         CREATE TABLE IF NOT EXISTS index_meta (
             jsonl_file TEXT PRIMARY KEY,
@@ -191,6 +197,12 @@ def init_db(conn: sqlite3.Connection):
     for col in ("name", "slug"):
         try:
             conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+    # Migrate: add source column (code vs cowork) to messages and sessions
+    for tbl in ("messages", "sessions"):
+        try:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN source TEXT DEFAULT 'code'")
         except sqlite3.OperationalError:
             pass
     # FTS5 virtual table — drop and recreate if schema changed (e.g. added assistant_response)
@@ -302,9 +314,11 @@ def _extract_name(jsonl_path: str, session_names: dict):
         session_names[last_sid] = last_name
 
 
-def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
+def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str, source: str = "code"):
     """Parse a single JSONL file and insert human messages with assistant responses.
     Returns (session_id, slug, custom_title) extracted from records.
+
+    `source` tags every row as 'code' (Claude Code CLI) or 'cowork' (desktop Cowork tab).
 
     Re-indexing relies on INSERT OR REPLACE keyed on `uuid` to update existing rows.
     We intentionally do NOT bulk-delete rows by jsonl_file first — if Claude Code
@@ -405,11 +419,12 @@ def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str):
         human_messages[-1][-1] = last_assistant_text
 
     if human_messages:
+        rows = [row + [source] for row in human_messages]
         conn.executemany("""
             INSERT OR REPLACE INTO messages
-            (uuid, session_id, project, timestamp, content, cwd, git_branch, jsonl_file, assistant_response)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, human_messages)
+            (uuid, session_id, project, timestamp, content, cwd, git_branch, jsonl_file, assistant_response, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, rows)
 
     return file_session_id, slug, custom_title
 
@@ -427,8 +442,8 @@ def rebuild_sessions(conn: sqlite3.Connection, session_names=None, session_slugs
     """Rebuild session summary table, marking sessions whose source files are missing."""
     conn.execute("DELETE FROM sessions")
     conn.execute("""
-        INSERT INTO sessions (session_id, project, first_ts, last_ts, message_count, file_missing)
-        SELECT session_id, project, MIN(timestamp), MAX(timestamp), COUNT(*), 0
+        INSERT INTO sessions (session_id, project, first_ts, last_ts, message_count, file_missing, source)
+        SELECT session_id, project, MIN(timestamp), MAX(timestamp), COUNT(*), 0, MAX(source)
         FROM messages
         GROUP BY session_id
     """)
@@ -452,6 +467,41 @@ def rebuild_sessions(conn: sqlite3.Connection, session_names=None, session_slugs
             f"UPDATE sessions SET file_missing = 1 WHERE session_id IN ({placeholders})",
             list(missing_sessions),
         )
+
+
+def iter_cowork_sessions():
+    """Yield (jsonl_path, project, cli_session_id, title, mtime) for each Cowork session.
+
+    Cowork stores per-session metadata at <group>/<sub>/local_<sid>.json. The actual
+    transcript is a standard Claude Code JSONL the sandboxed CLI wrote underneath that
+    sandbox, keyed by the metadata's `cliSessionId`. The friendly project name comes
+    from the user's first selected folder (the transcript's own cwd is the sandbox path).
+    """
+    if not COWORK_DIR.exists():
+        return
+    for meta_path in COWORK_DIR.glob("*/*/local_*.json"):
+        try:
+            meta = json.loads(meta_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        cli_sid = meta.get("cliSessionId")
+        if not cli_sid:
+            continue
+        sandbox = meta_path.with_suffix("")  # strip .json -> .../local_<sid>/
+        hits = list(sandbox.glob(f".claude/projects/*/{cli_sid}.jsonl"))
+        if not hits:
+            continue
+        jsonl_path = hits[0]
+        try:
+            mtime = jsonl_path.stat().st_mtime
+        except OSError:
+            continue
+        folders = meta.get("userSelectedFolders") or []
+        if folders:
+            project = decode_folder_name("-" + folders[0].strip("/").replace("/", "-"))
+        else:
+            project = "cowork"
+        yield str(jsonl_path), project, cli_sid, meta.get("title", ""), mtime
 
 
 def run_index(full_rebuild: bool = False) -> dict:
@@ -505,6 +555,20 @@ def run_index(full_rebuild: bool = False) -> dict:
                     (fpath, mtime, time.time()),
                 )
                 files_indexed += 1
+
+    # Cowork sessions (Claude desktop "Cowork" tab) — same JSONL format, nested in a
+    # per-session sandbox. Tagged source='cowork' so the UI can filter them apart.
+    for fpath, project, cli_sid, title, mtime in iter_cowork_sessions():
+        if title:
+            session_names_from_jsonl[cli_sid] = title
+        if not full_rebuild and fpath in existing and existing[fpath] >= mtime:
+            continue
+        index_file(conn, fpath, project, source="cowork")
+        conn.execute(
+            "INSERT OR REPLACE INTO index_meta (jsonl_file, mtime, indexed_at) VALUES (?, ?, ?)",
+            (fpath, mtime, time.time()),
+        )
+        files_indexed += 1
 
     rebuild_fts(conn)
     pid_names = load_session_names()

@@ -252,6 +252,11 @@ nav .reindex-btn:hover { color: var(--text); border-color: var(--green); }
     <div class="search-bar">
       <input type="search" id="search-input" placeholder="Search your messages... (press / to focus)" autocomplete="off">
       <select id="search-project"><option value="">All projects</option></select>
+      <select id="search-source" title="Filter by source">
+        <option value="">All sources</option>
+        <option value="code">Claude Code</option>
+        <option value="cowork">Cowork</option>
+      </select>
       <select id="search-tag"><option value="">All tags</option></select>
       <input type="date" id="search-from" title="From date">
       <input type="date" id="search-to" title="To date">
@@ -763,10 +768,11 @@ function resetSearch() {
 
 async function doSearch(page = 1) {
   const q = $('#search-input').value.trim();
-  const hasFilters = $('#search-project').value || $('#search-tag').value || $('#search-from').value || $('#search-to').value || $('#search-min-stars').value || searchStarred;
+  const hasFilters = $('#search-project').value || $('#search-source').value || $('#search-tag').value || $('#search-from').value || $('#search-to').value || $('#search-min-stars').value || searchStarred;
   if (!q && !hasFilters) { $('#search-results').innerHTML = ''; $('#results-info').textContent = ''; $('#search-pagination').innerHTML = ''; return; }
   searchPage = page;
   const params = new URLSearchParams({ q, page, project: $('#search-project').value, from: $('#search-from').value, to: $('#search-to').value });
+  if ($('#search-source').value) params.set('source', $('#search-source').value);
   if (searchStarred) params.set('starred', '1');
   const minStars = $('#search-min-stars').value;
   if (minStars) params.set('min_stars', minStars);
@@ -783,6 +789,7 @@ async function doSearch(page = 1) {
       <div class="result-meta">
         ${renderStars(r.session_id, r.starred, starId)}
         <span class="project">${esc(r.project)}</span>
+        ${sourceBadge(r.source)}
         ${r.git_branch ? `<span class="branch">${esc(r.git_branch)}</span>` : ''}
         <span>${formatTs(r.timestamp)}</span>
       </div>
@@ -812,12 +819,17 @@ $('#search-from').addEventListener('change', () => doSearch(1));
 $('#search-to').addEventListener('change', () => doSearch(1));
 $('#search-tag').addEventListener('change', () => doSearch(1));
 $('#search-min-stars').addEventListener('change', () => doSearch(1));
+$('#search-source').addEventListener('change', () => doSearch(1));
 
 // Populate project filter
 fetch('/api/projects').then(r => r.json()).then(projects => {
   const sel = $('#search-project');
   projects.forEach(p => { const o = document.createElement('option'); o.value = p.project; o.textContent = `${p.project} (${p.message_count})`; sel.appendChild(o); });
 });
+
+// Declared before the default loadProjects() call below — loadProjects reads
+// browseSource synchronously (before its first await), so it must be initialized first.
+let browseSource = ''; // '', 'code', 'cowork'
 
 // Default to Browse view with all projects selected
 loadProjects();
@@ -835,7 +847,7 @@ let browseAllProjects = []; // cached project list from API
 let browseLastViewedSession = null; // session ID to scroll to after going back
 
 async function loadProjects() {
-  const res = await fetch('/api/projects');
+  const res = await fetch('/api/projects' + (browseSource ? `?source=${browseSource}` : ''));
   browseAllProjects = await res.json();
   if (browseSelectedProjects.size === 0 && browseAllProjects.length > 0) {
     browseAllProjects.forEach(p => browseSelectedProjects.add(p.project));
@@ -857,6 +869,11 @@ function renderProjectSidebar() {
     <select class="btn-sm" onchange="browseSortProjects=this.value;renderProjectSidebar()" style="font-family:inherit;font-size:11px;cursor:pointer">
       <option value="chrono" ${browseSortProjects==='chrono'?'selected':''}>Recent first</option>
       <option value="alpha" ${browseSortProjects==='alpha'?'selected':''}>A \u2192 Z</option>
+    </select>
+    <select class="btn-sm" onchange="setBrowseSource(this.value)" style="font-family:inherit;font-size:11px;cursor:pointer" title="Filter by source">
+      <option value="" ${browseSource===''?'selected':''}>All sources</option>
+      <option value="code" ${browseSource==='code'?'selected':''}>Claude Code</option>
+      <option value="cowork" ${browseSource==='cowork'?'selected':''}>Cowork</option>
     </select>
   </div>`;
 
@@ -900,6 +917,14 @@ function selectAllProjects() {
   loadBrowseSessions();
 }
 
+// Switching source changes which projects exist, so reset the selection and
+// reload the sidebar (loadProjects re-selects all when the selection is empty).
+function setBrowseSource(value) {
+  browseSource = value;
+  browseSelectedProjects.clear();
+  loadProjects();
+}
+
 function clearProjectSelection() {
   browseSelectedProjects.clear();
   renderProjectSidebar();
@@ -920,6 +945,7 @@ async function loadBrowseSessions() {
   if (browseTagFilter) params.set('tag', browseTagFilter);
   if (browseCompleteFilter) params.set('complete', browseCompleteFilter);
   if (browseSort) params.set('sort', browseSort);
+  if (browseSource) params.set('source', browseSource);
   const res = await fetch(`/api/sessions?${params}`);
   const sessions = await res.json();
 
@@ -960,6 +986,7 @@ async function loadBrowseSessions() {
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-right:28px">
         ${renderStars(s.session_id, s.starred, starId)}
         ${s.name || s.slug ? `<span style="color:var(--green);font-size:13px;font-weight:bold">${esc(s.name || s.slug)}</span>` : ''}
+        ${sourceBadge(s.source)}
         <strong>${s.message_count} messages</strong>
         ${s.file_missing ? '<span style="color:var(--text2);font-size:11px;opacity:0.7" title="Source transcript file deleted from disk">&#x1f6ab; deleted</span>' : ''}
         ${browseSelectedProjects.size > 1 ? `<span style="color:var(--text2);font-size:11px">${esc(s.project)}</span>` : ''}
@@ -1125,11 +1152,20 @@ async function loadStats() {
          <div style="color:var(--text2);font-size:11px;margin-top:4px">${data.tombstone_messages} messages preserved</div>
        </div>`
     : '';
+  const cowork = (data.by_source || {}).cowork;
+  const coworkCard = cowork
+    ? `<div class="stat-card" title="Sessions from the Claude desktop Cowork tab.">
+         <div class="num">${cowork.sessions}</div>
+         <div class="label">Cowork sessions</div>
+         <div style="color:var(--text2);font-size:11px;margin-top:4px">${cowork.messages} messages</div>
+       </div>`
+    : '';
   let html = `
     <div class="stats-grid">
       <div class="stat-card"><div class="num">${data.total_messages}</div><div class="label">Messages</div></div>
       <div class="stat-card"><div class="num">${data.total_sessions}</div><div class="label">Sessions</div></div>
       <div class="stat-card"><div class="num">${data.total_projects}</div><div class="label">Projects</div></div>
+      ${coworkCard}
       ${tombstoneCard}
     </div>
     <h3 style="color:var(--text2);margin-bottom:12px;font-size:13px">PER PROJECT</h3>
@@ -1265,6 +1301,7 @@ async function loadDeletedSessions() {
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         ${renderStars(s.session_id, s.starred, starId)}
         ${s.name || s.slug ? `<span style="color:var(--green);font-size:13px;font-weight:bold">${esc(s.name || s.slug)}</span>` : ''}
+        ${sourceBadge(s.source)}
         <strong>${s.message_count} messages</strong>
         ${deletedSelectedProjects.size > 1 ? `<span style="color:var(--text2);font-size:11px">${esc(s.project)}</span>` : ''}
       </div>
@@ -1410,6 +1447,11 @@ async function doReindex(btn) {
 
 // --- Helpers ---
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+// Small chip marking a Cowork-sourced session. Code is the default and unbadged.
+function sourceBadge(source) {
+  if (source !== 'cowork') return '';
+  return '<span style="background:var(--accent2,#4ecca3);color:#0b1f17;font-size:10px;font-weight:bold;padding:1px 6px;border-radius:8px;letter-spacing:0.3px">COWORK</span>';
+}
 function formatTs(ts) {
   if (!ts) return '';
   try { const d = new Date(ts); return d.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) + ' ' + d.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'}); }

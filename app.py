@@ -441,6 +441,7 @@ def _attach_session_meta(conn, results, session_id_key="session_id"):
 def search():
     q = request.args.get("q", "").strip()
     project = request.args.get("project", "").strip()
+    source = request.args.get("source", "").strip()
     date_from = request.args.get("from", "").strip()
     date_to = request.args.get("to", "").strip()
     starred = request.args.get("starred", "").strip()
@@ -458,6 +459,9 @@ def search():
     if project:
         where_clauses.append("m.project = ?")
         params.append(project)
+    if source:
+        where_clauses.append("m.source = ?")
+        params.append(source)
     if date_from:
         where_clauses.append("m.timestamp >= ?")
         params.append(date_from)
@@ -478,7 +482,7 @@ def search():
         params.append(tag)
 
     # If no query text and no filters besides the hidden check, return empty
-    has_filters = project or date_from or date_to or min_stars or starred == "1" or tag
+    has_filters = project or source or date_from or date_to or min_stars or starred == "1" or tag
     if not q and not has_filters:
         return jsonify({"results": [], "total": 0, "page": page})
 
@@ -523,15 +527,21 @@ def search():
 
 @app.route("/api/projects")
 def projects():
+    source = request.args.get("source", "").strip()
     conn = get_db()
-    rows = conn.execute("""
+    src_filter = ""
+    params = []
+    if source:
+        src_filter = " AND messages.source = ?"
+        params.append(source)
+    rows = conn.execute(f"""
         SELECT project, COUNT(*) as message_count,
                COUNT(DISTINCT session_id) as session_count,
                MIN(timestamp) as first_ts, MAX(timestamp) as last_ts
         FROM messages
-        WHERE NOT EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = messages.session_id AND sh.hidden = 1)
+        WHERE NOT EXISTS (SELECT 1 FROM session_meta sh WHERE sh.session_id = messages.session_id AND sh.hidden = 1){src_filter}
         GROUP BY project ORDER BY last_ts DESC
-    """).fetchall()
+    """, params).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -539,6 +549,7 @@ def projects():
 @app.route("/api/sessions")
 def sessions():
     project = request.args.get("project", "").strip()
+    source = request.args.get("source", "").strip()
     show_archived = request.args.get("archived", "").strip()
     starred_only = request.args.get("starred", "").strip()
     min_stars = request.args.get("min_stars", "").strip()
@@ -558,6 +569,9 @@ def sessions():
             placeholders = ",".join("?" * len(projects))
             where.append(f"s.project IN ({placeholders})")
             params.extend(projects)
+    if source:
+        where.append("s.source = ?")
+        params.append(source)
     if min_stars:
         try:
             min_stars_int = int(min_stars)
@@ -671,6 +685,14 @@ def stats():
         FROM messages {hidden_filter} GROUP BY project ORDER BY messages DESC
     """).fetchall()
 
+    by_source = {}
+    for row in conn.execute(f"""
+        SELECT COALESCE(source, 'code') as source, COUNT(*) as messages,
+               COUNT(DISTINCT session_id) as sessions
+        FROM messages {hidden_filter} GROUP BY COALESCE(source, 'code')
+    """).fetchall():
+        by_source[row["source"]] = {"messages": row["messages"], "sessions": row["sessions"]}
+
     most_active = conn.execute(f"""
         SELECT substr(timestamp, 1, 10) as day, COUNT(*) as count
         FROM messages WHERE timestamp != '' {hidden_filter_and}
@@ -698,6 +720,7 @@ def stats():
         "total_projects": total_projects,
         "tombstone_sessions": tombstone_sessions,
         "tombstone_messages": tombstone_messages,
+        "by_source": by_source,
         "per_project": [dict(r) for r in per_project],
         "most_active_days": [dict(r) for r in most_active],
     })
