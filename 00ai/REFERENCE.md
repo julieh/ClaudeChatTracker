@@ -27,9 +27,9 @@ FEATURES.md            # User-facing feature reference
 ## Database Schema
 
 ### Tables
-- **messages** - Individual human messages (uuid, session_id, project, timestamp, content, cwd, git_branch, jsonl_file, assistant_response)
+- **messages** - Individual human messages (uuid, session_id, project, timestamp, content, cwd, git_branch, jsonl_file, assistant_response, source `'code'`/`'cowork'`)
 - **messages_fts** - FTS5 virtual table over messages (content, assistant_response)
-- **sessions** - Aggregated session info (session_id, project, first_ts, last_ts, message_count, name, slug, file_missing 0/1)
+- **sessions** - Aggregated session info (session_id, project, first_ts, last_ts, message_count, name, slug, file_missing 0/1, source `'code'`/`'cowork'`)
 - **session_meta** - Per-session metadata (session_id, starred 0-5, archived 0/1, hidden 0/1, complete 0/1)
 - **session_tags** - Many-to-many session tags (session_id, tag)
 - **index_meta** - Tracks which JSONL files have been indexed and their mtimes
@@ -45,9 +45,9 @@ FEATURES.md            # User-facing feature reference
 | Route | Method | Description |
 |-------|--------|-------------|
 | `/` | GET | Serves the SPA |
-| `/api/search?q=&project=&from=&to=&starred=&min_stars=&tag=&page=` | GET | FTS search with filters, paginated. Filter-only search (no `q`) is allowed when at least one filter is set. |
-| `/api/projects` | GET | List all projects with counts, ordered by last_ts DESC |
-| `/api/sessions?project=&archived=&starred=&min_stars=&tag=&complete=&sort=` | GET | Sessions list. `project` supports comma-separated multi-select. `complete` is `open` / `done` / unset. Sort: date_desc/date_asc/stars_desc/stars_asc |
+| `/api/search?q=&project=&source=&from=&to=&starred=&min_stars=&tag=&page=` | GET | FTS search with filters, paginated. Filter-only search (no `q`) is allowed when at least one filter is set. `source` is `code` / `cowork` / unset. |
+| `/api/projects?source=` | GET | List all projects with counts, ordered by last_ts DESC. Optional `source` (`code`/`cowork`) scopes the project list to one source. |
+| `/api/sessions?project=&source=&archived=&starred=&min_stars=&tag=&complete=&sort=` | GET | Sessions list. `project` supports comma-separated multi-select. `source` is `code` / `cowork` / unset. `complete` is `open` / `done` / unset. Sort: date_desc/date_asc/stars_desc/stars_asc |
 | `/api/session/<id>` | GET | All messages in a session |
 | `/api/session/<id>/meta` | GET | Starred/archived/complete/tags for a session |
 | `/api/session/<id>/star` | PUT | Set star rating (body: `{rating: 0-5}`). Re-applying the current rating clears it. |
@@ -58,7 +58,7 @@ FEATURES.md            # User-facing feature reference
 | `/api/session/<id>/unhide` | PUT | Restore a hidden session |
 | `/api/tags` | GET | All tags with counts |
 | `/api/timeline?granularity=day|week` | GET | Message counts by period and project |
-| `/api/stats` | GET | Aggregate statistics |
+| `/api/stats` | GET | Aggregate statistics. Includes a `by_source` breakdown (`{code: {...}, cowork: {...}}`) of messages/sessions per source. |
 | `/api/deleted?project=&starred=&min_stars=&tag=&sort=` | GET | List hidden/deleted sessions (same filters as /api/sessions) |
 | `/api/deleted/projects` | GET | Projects that have at least one hidden session |
 | `/api/reindex` | POST | Re-index transcripts (incremental) |
@@ -96,6 +96,7 @@ The tab bar is in this order; **Dashboard is the default tab on load**.
 - `browseAllProjects` (Array) - Cached project list from API
 - `browseSortProjects` ('chrono' | 'alpha') - Sidebar sort order
 - `browseShowArchived`, `browseStarredOnly`, `browseMinStars`, `browseTagFilter`, `browseSort` - Session filters
+- `browseSource` ('' | 'code' | 'cowork') - Source filter; declared before the first `loadProjects()` call because that call reads it synchronously
 - `browseLastViewedSession` - Session ID to scroll back to after returning from detail view
 
 ### Key State Variables (Deleted view)
@@ -107,6 +108,7 @@ The tab bar is in this order; **Dashboard is the default tab on load**.
 - `renderProjectSidebar()` - Renders sidebar with toolbar (Select All, Clear, sort dropdown) and project list
 - `toggleProject(name)` - Toggle a project in/out of selection
 - `selectAllProjects()` / `clearProjectSelection()` - Bulk selection
+- `setBrowseSource(value)` - Set the Browse source filter; clears the project selection and reloads the sidebar (since which projects exist depends on source)
 - `loadBrowseSessions()` - Fetches and renders sessions for all selected projects
 - `showSession(id)` - Shows full message list for a session
 - `hideSession(id)` - Soft-delete a session (sets hidden=1, removes from all views except Deleted)
@@ -116,6 +118,7 @@ The tab bar is in this order; **Dashboard is the default tab on load**.
 - `renderStars(sessionId, rating, containerId)` - Star rating widget (1-5)
 - `renderTagChips(tags, sessionId, editable)` - Tag pills with inline add/remove
 - `esc(s)` - HTML-escapes text (use `JSON.stringify` for onclick attributes to avoid XSS)
+- `sourceBadge(source)` - Renders the green `COWORK` chip for `source==='cowork'`; returns empty string for `'code'` (the unbadged default)
 
 ### CSS
 - Dark theme using CSS custom properties (`:root` vars)
@@ -146,4 +149,8 @@ lsof -ti:5111 | xargs kill
 
 ## Data Source
 
-Transcripts come from `~/.claude/projects/` where each subfolder is a project (encoded path like `-Users-julie-projects-myproject`) containing `.jsonl` files. The indexer decodes folder names back to readable project paths and extracts only human-typed messages (type=user, has permissionMode, not meta, not tool-sourced).
+Transcripts come from `~/.claude/projects/` where each subfolder is a project (encoded path like `-Users-julie-projects-myproject`) containing `.jsonl` files. The indexer decodes folder names back to readable project paths and extracts only human-typed messages (type=user, has permissionMode, not meta, not tool-sourced). These rows are tagged `source='code'`.
+
+### Cowork sessions
+
+The Claude desktop **Cowork** tab runs the Claude Code CLI inside a per-session sandbox, so its transcript is a standard CC JSONL nested under the sandbox home. `iter_cowork_sessions()` walks `COWORK_DIR` (platform-conditional via `_cowork_dir()`: `~/Library/Application Support/Claude/local-agent-mode-sessions` on macOS, `%APPDATA%\Claude\local-agent-mode-sessions` on Windows, `~/.config/Claude/local-agent-mode-sessions` on Linux), reading each `<group>/<sub>/local_<sid>.json` metadata file. The transcript JSONL is found under that sandbox keyed by the metadata's `cliSessionId`, and the friendly project name is derived from the user's first `userSelectedFolders` entry (the transcript's own cwd is the sandbox path). These rows are tagged `source='cowork'` and honor the same mtime-based incremental indexing as Code transcripts.
