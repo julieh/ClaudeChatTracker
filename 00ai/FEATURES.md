@@ -15,7 +15,9 @@ A Flask single-page app that runs locally at <http://localhost:5111>. It
 indexes the JSONL transcripts Claude Code writes under `~/.claude/projects/`
 into a SQLite FTS5 database so you can search, browse, rate, tag, and export
 your past conversations — long after Claude Code has rotated the original
-files off disk.
+files off disk. Sessions from the Claude desktop **Cowork** tab are indexed
+too (they run the same CLI in a sandbox), tagged so you can filter them apart
+from Code sessions.
 
 Everything is local: nothing is sent anywhere. Optional Slack sync (read-only)
 brings your own Slack messages into the same DB so the timesheet export can
@@ -28,7 +30,11 @@ include them.
 The tab bar runs across the top. Tabs in order: **Dashboard, Search, Browse,
 Timeline, Stats, Deleted**. Dashboard is the default.
 
-### Dashboard
+### Dashboard (macOS only)
+
+> **macOS only.** The live Dashboard relies on Claude Code hooks that fire a
+> bash `curl` command, which isn't supported on Windows. On Windows the
+> Dashboard tab stays empty; every other view works normally.
 
 Live view of which Claude Code sessions are running right now. Three sections:
 
@@ -55,6 +61,7 @@ Matches are highlighted inline with `<mark>`.
 Filters (stack as many as you want):
 
 - Project dropdown
+- Source dropdown (All sources / Claude Code / Cowork)
 - Date range (From / To)
 - Tag dropdown
 - Starred-only toggle
@@ -85,6 +92,7 @@ The home view for organizing. Project sidebar on the left, sessions on the right
 - Sort: Newest, Oldest, Most stars, Fewest stars
 - Show archived toggle
 - Tag dropdown
+- Source dropdown (All sources / Claude Code / Cowork) — sits in the project-sidebar toolbar. Switching source resets the project selection.
 
 **Session card:** message count, first-message preview, project (when
 multi-project), date range, star widget, Complete checkbox (top right), tag
@@ -93,6 +101,9 @@ Delete button.
 
 A **dashed border** + 🚫 icon means the source JSONL has been deleted from
 disk by Claude Code's rotation — but the transcript is still here.
+
+A green **COWORK** badge marks sessions captured from the Claude desktop Cowork
+tab. Claude Code sessions are the default and carry no badge.
 
 Clicking a card opens the full session detail (see *Per-session features*).
 
@@ -107,7 +118,9 @@ Stacked bar chart of message volume over time, colored by project.
 ### Stats
 
 Three big numbers at the top (total messages, total sessions, total projects),
-then a per-project table and a most-active-days table. Static; no filters.
+then a per-project table and a most-active-days table. Static; no filters. When
+any Cowork sessions exist, a **Cowork sessions** card joins the top row (session
+count + message count).
 
 ### Deleted
 
@@ -180,11 +193,15 @@ legend sheet.
 Internal system noise (`<task-notification>`, `<local-command-stdout>`,
 `<bash-stdout>`) is filtered out.
 
-### Kill Process
+### Kill Process (macOS only)
 
 Confirms, then shuts down the Flask server (kills whatever is listening on
 port 5111). Use this when you'd otherwise be hunting for the terminal it's
 running in.
+
+> **macOS / Linux only.** This uses the Unix `lsof`/`kill` commands, which
+> don't exist on Windows — the button does nothing there. Windows users stop
+> the app by closing its terminal window (or pressing `Ctrl+C` in it).
 
 ---
 
@@ -208,9 +225,11 @@ Four separate sync mechanisms. Listed in the order you'll use them.
 - **Manual refresh:** click **Reindex** in the top bar.
 - **From the CLI:** `python indexer.py` (incremental) or `python indexer.py --full` (full rebuild — wipes `messages` and `index_meta`, re-parses every file). You'd want `--full` after pulling a schema change, or if you suspect the index is corrupt.
 - **What gets indexed:** human-typed messages and `/slash-commands`. Each human message is stored alongside the next assistant response as `assistant_response` so search can match Claude's text too.
+- **Cowork sessions:** alongside `~/.claude/projects/`, the indexer also discovers Claude desktop Cowork transcripts from each per-session sandbox and tags them `source='cowork'`. The sandbox location is platform-specific: `~/Library/Application Support/Claude/local-agent-mode-sessions/` on macOS, `%APPDATA%\Claude\local-agent-mode-sessions\` on Windows, `~/.config/Claude/local-agent-mode-sessions/` on Linux. Same JSONL format, same incremental-by-mtime indexing. The friendly project name comes from the folder you selected in Cowork.
 
-### 2. Live Dashboard
+### 2. Live Dashboard (macOS only)
 
+- **macOS only:** the hooks below are bash `curl` commands and don't run on Windows. On Windows the Dashboard stays empty; everything else works.
 - **Hooks (recommended):** if you set up the four hooks in `~/.claude/settings.json` (see [`SetupInstructionsForClaude.md`](00ai/SetupInstructionsForClaude.md) Step 6), every Claude Code session sends `SessionStart`, `UserPromptSubmit`, `Stop`, `SessionEnd` pings to localhost. The dashboard reflects them in near-real-time.
 - **Disk-scan fallback:** dashboard state is in-memory only, so a server restart wipes it. On startup the app does a 24-hour scan of `~/.claude/projects/` to repopulate Active and Recently Closed from JSONL mtimes (sessions idle > 5 minutes are treated as closed).
 - **Manual repopulate:** click **Refresh** on the Dashboard tab to re-run the disk scan.
@@ -235,8 +254,9 @@ Four separate sync mechanisms. Listed in the order you'll use them.
 | Path | What it is |
 |------|-----------|
 | `~/.claude/projects/*/*.jsonl` | Claude Code transcripts. Source of truth — Claude rotates these off disk over time. |
+| Cowork sandboxes (per OS — see below) `/*/*/` | Per-session Claude desktop **Cowork** sandboxes. Each holds a nested CC JSONL (keyed by `cliSessionId`) plus a `local_<sid>.json` metadata file. Indexed as `source='cowork'`. macOS: `~/Library/Application Support/Claude/local-agent-mode-sessions/`; Windows: `%APPDATA%\Claude\local-agent-mode-sessions\`; Linux: `~/.config/Claude/local-agent-mode-sessions/`. |
 | `~/.claude/sessions/*.json` | Terminal-window session names. Read-only by this app, used for friendly labels. |
-| `~/.claude/settings.json` | Where the optional Dashboard hooks are installed. |
+| `~/.claude/settings.json` | Where the optional Dashboard hooks are installed (macOS only). |
 | `transcripts.db` (in this repo) | The app's SQLite index. Gitignored. |
 | `~/claudeChatBackups/` | Output of the Backup button. |
 | `00ai/timedumps/` | Output of the Dump Timesheet button. |

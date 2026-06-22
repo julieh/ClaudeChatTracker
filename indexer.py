@@ -4,35 +4,52 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import time
 from pathlib import Path
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 SESSIONS_DIR = Path.home() / ".claude" / "sessions"
-# Claude desktop "Cowork" tab: each session runs the Claude Code CLI inside a
-# per-session sandbox, so its transcript is a standard CC JSONL nested under the
-# sandbox home, alongside a local_<sid>.json metadata file.
-COWORK_DIR = Path.home() / "Library" / "Application Support" / "Claude" / "local-agent-mode-sessions"
+
+
+def _cowork_dir() -> Path:
+    """Claude desktop "Cowork" tab: each session runs the Claude Code CLI inside a
+    per-session sandbox, so its transcript is a standard CC JSONL nested under the
+    sandbox home, alongside a local_<sid>.json metadata file. The sandboxes live in
+    the platform's per-user app-support directory."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Claude" / "local-agent-mode-sessions"
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(base) / "Claude" / "local-agent-mode-sessions"
+    return Path.home() / ".config" / "Claude" / "local-agent-mode-sessions"
+
+
+COWORK_DIR = _cowork_dir()
 DB_PATH = Path(__file__).parent / "transcripts.db"
 
 
 def decode_folder_name(folder: str) -> str:
-    """Convert folder name like -Users-julie-projects-myapp to projects/myapp."""
-    # Strip the home-directory prefix portion
-    parts = folder.split("-")
-    # Find the meaningful suffix after the home dir segments
-    # Pattern: -Users-<user>-... we want the project-relevant tail
-    home = str(Path.home()).strip("/").split("/")  # e.g. ['Users', 'julie']
-    remaining = parts[1:]  # skip leading empty from first dash
-    # Skip parts that match the home directory
-    idx = 0
-    for segment in home:
-        if idx < len(remaining) and remaining[idx] == segment:
-            idx += 1
-    remaining = remaining[idx:]
-    if not remaining:
+    """Convert a Claude Code project folder name into a readable project path.
+
+    Claude Code encodes a cwd into the folder name by replacing path separators with
+    '-': macOS/Linux '/Users/julie/projects/myapp' -> '-Users-julie-projects-myapp';
+    Windows 'C:\\Users\\julie\\projects\\myapp' -> 'C--Users-julie-projects-myapp'
+    (both ':' and '\\' become '-'). We strip the encoded home-directory prefix and
+    return the remainder with '-' turned back into '/', e.g. 'projects/myapp'.
+
+    Cross-platform: the home dir is encoded the same way before stripping, so it works
+    regardless of separator. If the prefix doesn't match (unexpected encoding), the
+    folder name is returned unchanged — a degraded label, never a crash.
+    """
+    home_encoded = re.sub(r"[/\\:]", "-", str(Path.home()))
+    rest = folder
+    if rest.startswith(home_encoded):
+        rest = rest[len(home_encoded):]
+    rest = rest.strip("-")
+    if not rest:
         return folder
-    return "/".join(remaining)
+    return rest.replace("-", "/")
 
 
 def is_human_message(record: dict) -> bool:
@@ -249,7 +266,7 @@ def load_session_names() -> dict:
         return names
     for f in SESSIONS_DIR.glob("*.json"):
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(f.read_text(encoding="utf-8"))
             sid = data.get("sessionId", "")
             name = data.get("name", "")
             if sid and name:
@@ -262,7 +279,7 @@ def load_session_names() -> dict:
 def _extract_slug(jsonl_path: str, session_slugs: dict):
     """Quick scan of first few lines to grab sessionId and slug."""
     try:
-        with open(jsonl_path, "r") as f:
+        with open(jsonl_path, "r", encoding="utf-8") as f:
             for i, line in enumerate(f):
                 if i >= 5:
                     break
@@ -292,7 +309,7 @@ def _extract_name(jsonl_path: str, session_names: dict):
     last_sid = ""
     last_name = ""
     try:
-        with open(jsonl_path, "r") as f:
+        with open(jsonl_path, "r", encoding="utf-8") as f:
             for line in f:
                 if '"custom-title"' not in line:
                     continue
@@ -333,7 +350,7 @@ def index_file(conn: sqlite3.Connection, jsonl_path: str, project: str, source: 
     file_session_id = ""
     custom_title = ""
     try:
-        with open(jsonl_path, "r") as f:
+        with open(jsonl_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -481,7 +498,7 @@ def iter_cowork_sessions():
         return
     for meta_path in COWORK_DIR.glob("*/*/local_*.json"):
         try:
-            meta = json.loads(meta_path.read_text())
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
         cli_sid = meta.get("cliSessionId")
@@ -498,7 +515,7 @@ def iter_cowork_sessions():
             continue
         folders = meta.get("userSelectedFolders") or []
         if folders:
-            project = decode_folder_name("-" + folders[0].strip("/").replace("/", "-"))
+            project = decode_folder_name("-" + folders[0].replace("\\", "/").strip("/").replace("/", "-"))
         else:
             project = "cowork"
         yield str(jsonl_path), project, cli_sid, meta.get("title", ""), mtime

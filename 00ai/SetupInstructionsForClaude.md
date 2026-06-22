@@ -118,7 +118,14 @@ Briefly explain:
   > "Start Claude Chats — run `python3 app.py` from this folder in the
   > background and tell me when it's ready."
 
-## Step 6 — Optional: turn on the live Dashboard
+## Step 6 — Optional: turn on the live Dashboard (macOS only)
+
+> **macOS only.** The live Dashboard is powered by Claude Code hooks that run a
+> bash `curl` command (`curl ... >/dev/null 2>&1 &`). That syntax does not work
+> on Windows, so the Dashboard is not supported there. **If the user is on
+> Windows, skip this entire step** — Search, Browse, Timeline, Stats, and the
+> Timesheet export all work fine without it. Tell the Windows user the Dashboard
+> tab will simply stay empty, and move on to Step 6.5.
 
 Ask the user, exactly:
 
@@ -296,7 +303,9 @@ Ask the user, exactly:
    `groups:history`, `im:read`, `im:history`, `mpim:read`, `mpim:history`,
    `users:read`).
 2. **Help them set the env var.** They have two options; pick whichever fits
-   their setup:
+   their setup. The commands differ by OS — use the right block.
+
+   **macOS / Linux (bash/zsh):**
    - **Per-session (simple, what `README.md` shows):** before launching the
      app, run `export SLACK_USER_TOKEN=xoxp-...` in the same terminal. This
      means they need to set it again every time they reopen the terminal.
@@ -307,6 +316,19 @@ Ask the user, exactly:
      a new terminal afterwards so the variable is loaded. **Never** check
      this into git — `~/.zshrc` lives in their home directory, not in this
      repo, so that's safe by default.
+
+   **Windows:**
+   - **Per-session (simple):** before launching the app, in the *same*
+     terminal run `set SLACK_USER_TOKEN=xoxp-...` (Command Prompt) or
+     `$env:SLACK_USER_TOKEN="xoxp-..."` (PowerShell). It's forgotten when they
+     close the window.
+   - **Persistent (recommended for daily use):** run
+     `setx SLACK_USER_TOKEN "xoxp-..."` once (Command Prompt or PowerShell).
+     This saves it for all *future* terminals — they must open a **new**
+     terminal afterward for it to take effect (it does not affect the current
+     one). Alternatively, set it via *Settings → System → About → Advanced
+     system settings → Environment Variables*. This is stored in the user's
+     Windows account, not in this repo, so it's never committed to git.
 3. **Restart the app** so it picks up the new env var. If the app is
    currently running, ask the user to say "stop the app" first; once it's
    down, relaunch with `python3 app.py`.

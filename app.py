@@ -125,7 +125,7 @@ def _scan_transcript(transcript_path):
     if not transcript_path:
         return
     try:
-        with open(transcript_path, "r") as f:
+        with open(transcript_path, "r", encoding="utf-8") as f:
             for line in f:
                 try:
                     yield json.loads(line)

@@ -112,8 +112,22 @@ The **Sync Slack** button pulls **only your own** Slack messages into a local `s
 3. Click **Install to Workspace** at the top of the OAuth page (your workspace may require admin approval).
 4. Copy the **User OAuth Token** — it starts with `xoxp-`.
 5. Set the env var before launching the app:
+
+   **macOS / Linux (bash/zsh):**
    ```bash
    export SLACK_USER_TOKEN=xoxp-...
+   python3 app.py
+   ```
+
+   **Windows (Command Prompt):**
+   ```bat
+   set SLACK_USER_TOKEN=xoxp-...
+   python app.py
+   ```
+
+   **Windows (PowerShell):**
+   ```powershell
+   $env:SLACK_USER_TOKEN="xoxp-..."
    python app.py
    ```
 6. Click **Sync Slack** in the UI. The first run pulls the past 30 days of your messages; later clicks pull only what's new since the last successful sync.

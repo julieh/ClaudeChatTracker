@@ -8,6 +8,10 @@ A Flask web app for searching and browsing Claude Code conversation transcripts.
 
 For user-visible behavior (every button, every view, every sync mechanism), see `FEATURES.md`. This file focuses on architecture for someone editing the code.
 
+## Platform notes
+
+The core app (Search, Browse, Timeline, Stats, Timesheet, Slack sync) is cross-platform — Windows, macOS, and Linux. Keep it that way: always pass `encoding="utf-8"` when opening transcript files (Windows defaults to cp1252 and chokes on non-ASCII), and use `pathlib`/the home-prefix helpers rather than hardcoded `/` path math. Two features are intentionally **macOS/Unix-only** and are documented as such: the **Kill Process** button (`/api/kill` shells out to `lsof`/`kill`) and the **live Dashboard** (its Claude Code hooks are bash `curl` commands). `COWORK_DIR` is platform-conditional (see `_cowork_dir()` in `indexer.py`).
+
 ## Commands
 
 ```bash
